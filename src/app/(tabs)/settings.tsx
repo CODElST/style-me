@@ -70,13 +70,16 @@ export default function SettingsScreen() {
 
           <Card style={{ marginBottom: Spacing.four }}>
             <SectionLabel>Intelligence</SectionLabel>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <Text style={{ color: t.text, flex: 1, lineHeight: 20 }}>{ai.label}</Text>
+            <Row style={{ justifyContent: 'space-between', paddingVertical: 2 }}>
+              <Text style={{ color: t.textSecondary }}>Engine now running on this phone</Text>
+              <Text style={{ color: t.accent, fontWeight: '700' }}>
+                {ai.nativeAvailable ? 'Rules + on-device AI' : 'Rules engine (offline)'}
+              </Text>
             </Row>
             <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: Spacing.two }}>
-              Recommendations run fully offline: deterministic color, formality, season and
-              freshness rules. When the on-device AI bridge (Apple Intelligence / Gemini Nano)
-              is added, it refines tags and phrasing — never a hard dependency.
+              {ai.nativeAvailable
+                ? 'Your phone\'s built-in AI (Apple Intelligence / Gemini Nano) is active. Look scoring and pairing always come from the deterministic style engine; the AI only refines phrasing and tag suggestions — fully on device, no network.'
+                : 'Look scoring, pairing and tag suggestions come from the deterministic style engine — color, formality, season and freshness rules that run 100% offline on this phone. No AI model is active here yet: when the on-device bridge (Apple Intelligence / Gemini Nano) becomes available on a supported build, this card will say so, and it only ever upgrades wording — never a hard dependency.\n\nNew: adding items by product link also parses and tags on device; nothing goes through a server.'}
             </Text>
           </Card>
 

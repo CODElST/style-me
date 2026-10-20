@@ -1,8 +1,9 @@
-// Add item — camera → crop → review tags → optional visual web lookup → save.
+// Add item — camera / library / product link → auto-crop → review tags →
+// optional visual web lookup → save.
 // Flow mirrors the product spec: AI/rules propose, the user confirms.
 
 import { Image } from 'expo-image';
-import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
@@ -17,6 +18,8 @@ import { saveItem } from '@/lib/db';
 import { suggestTags } from '@/lib/ai';
 import { pickPhoto, finalizePhoto } from '@/lib/photos';
 import { webLookup } from '@/lib/lookup';
+import { analyzeImageFile, downloadAndPrepare, fetchProduct } from '@/lib/extract';
+import { type ExtractedPage, autoTagsFromProduct, topImages } from '@/lib/product-html';
 import { typeOf } from '@/lib/taxonomy';
 import type { Item, LookupRef } from '@/lib/types';
 import { uid } from '@/lib/util';
@@ -48,9 +51,15 @@ export default function AddItemScreen() {
   const [step, setStep] = useState<Step>('Photo');
   const [uri, setUri] = useState<string | null>(null);
   const [draft, setDraft] = useState<TagDraft>(toDraftDefault());
-  const [busy, setBusy] = useState<'pick' | 'save' | 'lookup' | null>(null);
+  const [busy, setBusy] = useState<'pick' | 'save' | 'lookup' | 'fetchLink' | 'useLink' | null>(null);
   const [refs, setRefs] = useState<(LookupRef)[]>([]);
   const [savingRef, setSavingRef] = useState<string | null>(null);
+
+  // product-link state
+  const [linkInput, setLinkInput] = useState('');
+  const [page, setPage] = useState<ExtractedPage | null>(null);
+  const [selectedImg, setSelectedImg] = useState(0);
+  const [autofillNote, setAutofillNote] = useState<string | null>(null);
 
   const addPhoto = async (source: 'camera' | 'library') => {
     setBusy('pick');
@@ -61,6 +70,65 @@ export default function AddItemScreen() {
       setUri(stored);
     } catch (e) {
       Alert.alert('Photo', `Could not use this photo: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const fetchLink = async () => {
+    const raw = linkInput.trim();
+    if (!/^https?:\/\//i.test(raw)) {
+      Alert.alert('Link', 'Paste an https:// link to a product page.');
+      return;
+    }
+    setBusy('fetchLink');
+    try {
+      const result = await fetchProduct(raw);
+      setPage(result);
+      setSelectedImg(0);
+      setAutofillNote(null);
+      if (result.images.length === 0) {
+        Alert.alert(
+          'Link',
+          'Found the page but no product picture. The site probably lazy-loads images — screenshot the product and use the library instead.',
+        );
+      }
+    } catch (e) {
+      Alert.alert(
+        'Link',
+        `Could not read that page — ${(e as Error).message}. Many sites block automated reads; take a quick screenshot and use the library instead.`,
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyLinkImage = async () => {
+    if (!page) return;
+    const imageUrl = topImages(page, 6)[selectedImg];
+    if (!imageUrl) return;
+    setBusy('useLink');
+    try {
+      const stored = await downloadAndPrepare(imageUrl, idRef.current);
+      setUri(stored);
+      let pixel = null;
+      try {
+        pixel = await analyzeImageFile(stored);
+      } catch {
+        // pixel analysis is best-effort — text tags still apply
+      }
+      const auto = autoTagsFromProduct(page, pixel);
+      setDraft((d) => ({
+        ...d,
+        ...auto,
+        note: d.note || (page.title ? `from ${page.site ?? 'web'}: ${page.title}` : ''),
+      }));
+      setSavingRef(page.url);
+      setAutofillNote(
+        `Pre-filled from ${page.site ?? 'the product page'} — review type, colors and warmth before saving.`,
+      );
+    } catch (e) {
+      Alert.alert('Link', `Could not use that image: ${(e as Error).message}`);
     } finally {
       setBusy(null);
     }
@@ -191,8 +259,9 @@ export default function AddItemScreen() {
                 ) : (
                   <View style={styles.placeholder}>
                     <Text style={{ color: t.textSecondary, fontSize: 13.5, textAlign: 'center', lineHeight: 20 }}>
-                      Lay the piece on a plain background and crop to just the garment. The crop is
-                      what gets resized and stored on the phone.
+                      Lay the piece on a plain background, or paste a product link below and
+                      StyleMe will pull the shot itself. The crop is what gets resized and
+                      stored on the phone.
                     </Text>
                     <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.three }}>
                       <PrimaryButton label="Take photo" onPress={() => void addPhoto('camera')} />
@@ -200,6 +269,85 @@ export default function AddItemScreen() {
                     </View>
                   </View>
                 )}
+              </Card>
+
+              <Card style={{ marginTop: Spacing.three }}>
+                <SectionLabel>Or pull it from a product link</SectionLabel>
+                <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: 2 }}>
+                  Paste the product page URL. The app reads it once itself — nothing goes
+                  through a server — picks the product shot, auto-crops it to 3:4 and
+                  pre-fills the tags from the page&apos;s own description.
+                </Text>
+                <Row style={{ gap: Spacing.two, marginTop: Spacing.three }}>
+                  <TextInput
+                    value={linkInput}
+                    onChangeText={setLinkInput}
+                    placeholder="https:// shop.com/product…"
+                    placeholderTextColor={t.textSecondary}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                    style={[styles.linkInput, { color: t.text, borderColor: t.hairline }]}
+                  />
+                  <PrimaryButton
+                    label={busy === 'fetchLink' ? '…' : 'Find'}
+                    tone="plain"
+                    onPress={() => void fetchLink()}
+                    disabled={busy !== null}
+                  />
+                </Row>
+
+                {page && page.images.length > 0 ? (
+                  <>
+                    <Text style={{ color: t.textSecondary, fontSize: 11.5, marginTop: Spacing.three }}>
+                      {topImages(page, 6).length > 1 ? 'Tap the picture to use' : 'Picture found'}
+                    </Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ gap: Spacing.two, paddingVertical: Spacing.two }}
+                    >
+                      {topImages(page, 6).map((candidateUrl, i) => (
+                        <Pressable
+                          key={candidateUrl + i}
+                          onPress={() => setSelectedImg(i)}
+                          style={[
+                            styles.candidate,
+                            i === selectedImg && { borderColor: t.accent, borderWidth: 2 },
+                          ]}
+                          accessibilityLabel={`Product picture ${i + 1}`}
+                        >
+                          <Image
+                            source={{ uri: candidateUrl }}
+                            style={{ width: '100%', height: '100%' }}
+                            contentFit="cover"
+                            transition={150}
+                          />
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                    {page.title ? (
+                      <Text numberOfLines={2} style={{ color: t.textSecondary, fontSize: 12.5 }}>
+                        {page.site ? `${page.site} · ` : ''}{page.title}
+                      </Text>
+                    ) : null}
+                    <View style={{ marginTop: Spacing.three }}>
+                      <PrimaryButton
+                        label={busy === 'useLink' ? 'Preparing…' : 'Use this image'}
+                        onPress={() => void applyLinkImage()}
+                        disabled={busy !== null}
+                      />
+                    </View>
+                  </>
+                ) : busy === 'fetchLink' ? (
+                  <Text style={{ color: t.textSecondary, fontSize: 12.5, marginTop: Spacing.three }}>
+                    Reading the page…
+                  </Text>
+                ) : page && page.title ? (
+                  <Text numberOfLines={2} style={{ color: t.textSecondary, fontSize: 12.5, marginTop: Spacing.three }}>
+                    No product picture in the page HTML — screenshot it and use the library.
+                  </Text>
+                ) : null}
               </Card>
             </>
           ) : (
@@ -221,7 +369,7 @@ export default function AddItemScreen() {
               </Row>
 
               <Card style={{ marginBottom: Spacing.four }}>
-                <TagForm value={draft} onChange={setDraft} />
+                <TagForm value={draft} onChange={setDraft} autofillNote={autofillNote} />
               </Card>
 
               <Card style={{ marginBottom: Spacing.four }}>
@@ -321,5 +469,22 @@ const styles = StyleSheet.create({
   placeholder: {
     padding: Spacing.three,
     alignItems: 'center',
+  },
+  linkInput: {
+    flex: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    fontSize: 13.5,
+  },
+  candidate: {
+    width: 84,
+    height: 112,
+    borderRadius: Radius.sm,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'transparent',
+    backgroundColor: '#EFEAE1',
   },
 });

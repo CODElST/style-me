@@ -40,10 +40,34 @@ export async function pickPhoto(source: Source): Promise<string | null> {
   return result.assets[0].uri;
 }
 
-/** Resizes to a wardrobe-friendly size and persists app-privately. */
+/**
+ * Resizes to a wardrobe-friendly size, enforces the 3:4 garment aspect
+ * (center-x, slightly top-biased crop — garment shots put the collar up high)
+ * and persists app-privately. Safe to call on already-3:4 sources.
+ */
 export async function finalizePhoto(uri: string, id: string): Promise<string> {
-  const context = ImageManipulator.manipulate(uri, { maxWidth: 1200 });
-  const image = await context.renderAsync();
+  // Pass 1: bounded decode just to learn the source dimensions.
+  const probe = await ImageManipulator.manipulate(uri, { maxWidth: 1400, maxHeight: 1400 }).renderAsync();
+  const w = probe.width;
+  const h = probe.height;
+
+  // Pass 2: crop to 3:4 when needed, then bound the long side to 1200px.
+  let ctx = ImageManipulator.manipulate(uri, { maxWidth: 1400, maxHeight: 1400 });
+  const target = 3 / 4;
+  let cw = w;
+  let ch = h;
+  if (Math.abs(w / h - target) > 0.04) {
+    cw = Math.round(Math.min(w, h * target));
+    ch = Math.round(Math.min(h, w / target));
+    const x = Math.round((w - cw) / 2);
+    const y = Math.round((h - ch) * 0.4);
+    ctx = ctx.crop({ originX: x, originY: y, width: cw, height: ch });
+  }
+  const long = Math.max(cw, ch);
+  if (long > 1200) {
+    ctx = cw >= ch ? ctx.resize({ width: 1200 }) : ctx.resize({ height: 1200 });
+  }
+  const image = await ctx.renderAsync();
   const saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.82 });
 
   if (Platform.OS === 'web') return saved.uri;

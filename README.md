@@ -6,6 +6,11 @@ Your closet is a private database on your phone: garments with photos and tags, 
 
 ## How it works
 
+Add a piece by **camera / library / product link**. A link is read once by the phone
+itself — the best product shot is picked, auto-cropped to 3:4, stored app-private, and
+type / color / pattern tags are pre-filled from the page text plus on-device pixel
+analysis. Tags are always yours to confirm, so the engine stays honest either way.
+
 ```
 ┌──────── Phone ──────────────────────────────────────────────┐
 │                                                             │
