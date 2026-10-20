@@ -1,26 +1,28 @@
 // AI layer.
 //
 // Design (local-first, from the product spec):
-//   1. Prefer on-device AI (Apple Foundation Models on iOS, Gemini Nano /
-//      ML Kit on Android) via a native module — added as a dev-build native
-//      module later (see README "Step 4"). The app publishes the hook points:
+//   1. Prefer on-device AI (Apple Foundation Models on iOS 26+, Gemini Nano /
+//      AICore on Android) via the local module `modules/styleme-ai`, which is
+//      only present in development builds (Expo Go cannot load it). The
+//      published hook points:
 //        - getAiStatus(): capability readout for Settings
-//        - suggestSeasonsHeuristics(): deterministic tag fallback (always works)
-//        - describeLookText(): text explanation (rules engine by default)
+//        - suggestTags(): deterministic tag fallback (always works)
+//        - describeLookText(): rules-engine explanation (always works)
+//        - describeLookEnhanced(): native phrasing when the model is usable
 //   2. Everything degrades gracefully to the deterministic rules engine, so the
 //      app remains fully useful offline and on unsupported hardware.
 
-import type { Item, OutfitCandidate, StyleContext } from './types';
+import type { NativeBridge } from './ai-bridge';
 import { bandOf, occasionOf, suggestSeasons, typeOf } from './taxonomy';
+import type { Item, OutfitCandidate, StyleContext } from './types';
 
-// Hook point for the native module. Once `npx create-expo-module styleme-ai`
-// (or similar) is added to the workspace and installed, import it here behind
-// a lazy require so JS-only builds never crash.
-let native: any = null;
+// Lazy, failure-safe load of the optional native bridge. On Expo Go or web
+// `requireNativeModule` throws and we stay with the rules engine.
+let native: NativeBridge | null = null;
 try {
-  // optional native peer; add the real module in step 4 (see README)
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  native = require('styleme-ai');
+  const mod = require('../../modules/styleme-ai') as { default?: NativeBridge };
+  native = mod?.default ?? null;
 } catch {
   native = null;
 }
@@ -32,7 +34,7 @@ export interface AiStatus {
 }
 
 export function getAiStatus(): AiStatus {
-  if (native?.getCapabilities?.()?.onDeviceTextModel) {
+  if (native?.isOnDeviceTextModelAvailable?.()) {
     return { nativeAvailable: true, label: 'On-device AI (native bridge active)' };
   }
   return {
@@ -70,4 +72,31 @@ export function describeLookText(ctx: StyleContext, candidate: OutfitCandidate, 
         : 'A decent fallback';
   return `${lead} for ${occ.label.toLowerCase()} in ${band.label.toLowerCase()} weather — `
     + `${pieces.join(', ')}. The palette is the main story here; swap shoes or the outer leg to tune it.`;
+}
+
+/**
+ * Rules phrasing, upgraded in one sentence by the on-device model when the
+ * native bridge says it is usable. Any failure silently returns the rules text.
+ */
+export async function describeLookEnhanced(
+  ctx: StyleContext,
+  candidate: OutfitCandidate,
+  items: Item[],
+): Promise<string> {
+  const rulesText = describeLookText(ctx, candidate, items);
+  const bridge = native;
+  if (!bridge?.describeLookAsync || !getAiStatus().nativeAvailable) return rulesText;
+  try {
+    const pieces = items
+      .filter((i) => i.category !== 'extra')
+      .map((i) => typeOf(i.subtype).label.toLowerCase());
+    return await bridge.describeLookAsync(
+      pieces,
+      occasionOf(ctx.occasion).label,
+      bandOf(ctx.temp).label,
+      candidate.score,
+    );
+  } catch {
+    return rulesText;
+  }
 }

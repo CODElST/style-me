@@ -36,7 +36,7 @@ Your closet is a private database on your phone: garments with photos and tags, 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Recommendations are scored and phrased by rules (color harmony, formality windows, warmth bands, freshness). The AI layer (`src/lib/ai.ts`) is a hook point: on-device models (Apple Foundation Models / Gemini Nano) via a native dev-build module refine tags and phrasing later — they are never a hard dependency, and everything degrades gracefully back to the rules engine.
+Recommendations are scored and phrased by rules (color harmony, formality windows, warmth bands, freshness). The AI layer (`src/lib/ai.ts`) is a hook point: on-device models (Apple Foundation Models / Gemini Nano) via the local module `modules/styleme-ai` refine tags and phrasing — they are never a hard dependency, and everything degrades gracefully back to the rules engine.
 
 ## Privacy, in one line
 
@@ -103,6 +103,9 @@ src/
    ├─ lookup.ts    # consent-checked lookup client
    ├─ types.ts     # domain types
    └─ util.ts      # uid, dates, seeded shuffle
+modules/
+└─ styleme-ai/     # local Expo module: Apple Foundation Models (iOS 26+),
+                   # Gemini Nano hook (Android), loaded only in dev builds
 server/
 └─ server.js       # zero-dependency Node lookup proxy
 ```
@@ -112,7 +115,7 @@ server/
 1. ✅ **Design** — domain model, tokens, screens.
 2. ✅ **Offline foundation** — SQLite, photo pipeline, tagging flow.
 3. ✅ **Outfit engine** — deterministic scoring, per-day seeded variety.
-4. 🔜 **Native AI** — on-device tagging/phrasing via a local Expo module dev build.
+4. 🟡 **Native AI** — local module `modules/styleme-ai` scaffolded: Apple Foundation Models capability probe + look phrasing (iOS 26+, Xcode 26 required to compile); Android Gemini Nano hook ready behind a `false` capability check. Wire screens to `describeLookEnhanced()` when testing on a dev build.
 5. ✅ **Web lookup** — consent-gated client + stateless proxy.
 6. 🔜 **Polish** — empty states, haptics, transitions, error copy.
 7. 🔜 **Extras** — weather prediction from wear logs, on-device backup export, optional encrypted sync.

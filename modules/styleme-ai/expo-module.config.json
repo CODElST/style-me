@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["StyleMeAi"]
+  },
+  "android": {
+    "modules": ["expo.modules.stylemeai.StyleMeAi"]
+  }
+}
