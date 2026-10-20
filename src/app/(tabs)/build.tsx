@@ -12,6 +12,7 @@ import {
   Card, Chip, ChipRow, Flow, PrimaryButton, Row, SectionLabel,
 } from '@/components/kit';
 import { OutfitCard } from '@/components/outfit-card';
+import { LookNote } from '@/components/look-note';
 import { SlotPickerModal } from '@/components/slot-picker';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -35,7 +36,8 @@ const SLOTS: { key: SlotKey; label: string }[] = [
   { key: 'extra', label: 'Extra' },
 ];
 
-export default function BuilderScreen() {  const t = useTheme();
+export default function BuilderScreen() {
+  const t = useTheme();
   const db = useSQLiteContext();
   const { items } = useWardrobe();
   const { settings } = useAppSettings();
@@ -196,6 +198,7 @@ export default function BuilderScreen() {  const t = useTheme();
                     reasons={look.reasons}
                     tags={look.tags}
                     venues={look.venues}
+                    note={<LookNote ctx={context} candidate={look} items={look.items} noteKey={look.key} />}
                     onPressItem={(item) => router.push(`/item/${item.id}`)}
                     footer={
                       <Row style={{ justifyContent: 'flex-end' }}>
@@ -233,6 +236,14 @@ export default function BuilderScreen() {  const t = useTheme();
                 reasons={manual.reasons}
                 tags={manual.tags}
                 venues={manual.venues}
+                note={
+                  <LookNote
+                    ctx={context}
+                    candidate={manual}
+                    items={manual.items}
+                    noteKey={`m:${manual.itemIds.join('|')}:${context.occasion}:${context.temp}:${context.mood}`}
+                  />
+                }
                 onPressItem={(item) => router.push(`/item/${item.id}`)}
                 footer={
                   <Row style={{ justifyContent: 'flex-end' }}>

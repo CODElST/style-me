@@ -18,6 +18,8 @@ export interface OutfitCardProps {
   venues?: OccasionId[];
   title?: string | null;
   meta?: string | null;
+  /** Extra styling copy rendered above `meta` (e.g. a <LookNote>). */
+  note?: ReactNode;
   onPressItem?: (item: Item) => void;
   footer?: ReactNode;
 }
@@ -25,7 +27,7 @@ export interface OutfitCardProps {
 /** Renders one look: thumbs, score, reasons and optional action footer. */
 export function OutfitCard(props: OutfitCardProps) {
   const t = useTheme();
-  const { items, score, grade, reasons = [], tags = [], venues = [], title, meta, onPressItem, footer } = props;
+  const { items, score, grade, reasons = [], tags = [], venues = [], title, meta, note, onPressItem, footer } = props;
 
   const fashion = items.filter((i) => i.category !== 'extra');
   const extras = items.filter((i) => i.category === 'extra');
@@ -99,6 +101,8 @@ export function OutfitCard(props: OutfitCardProps) {
           ))}
         </View>
       ) : null}
+
+      {note}
 
       {meta ? (
         <Text style={{ color: t.textSecondary, fontSize: 12, marginTop: Spacing.two }}>{meta}</Text>

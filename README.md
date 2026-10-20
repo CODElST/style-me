@@ -74,6 +74,41 @@ npx expo run:ios              # needs macOS + Xcode
 bunx eas-cli build --profile development --platform android
 ```
 
+### Windows long paths (local Android builds only)
+
+React Native autolinking configures some codegen CMake targets with source paths so
+deep that they exceed the Windows 260-char `MAX_PATH` limit, and `ninja` fails to
+create them no matter which version is installed or what `LongPathsEnabled` says:
+
+```
+ninja: error: mkdir(...): No such file or directory
+```
+
+The workaround: shorten the two offending source trees with NTFS junctions and point
+the packages' CMake source globs at the junctions. This is a `node_modules` patch,
+so it must be re-applied after every fresh `npm install`:
+
+```bash
+node scripts/fix-windows-longpaths.js    # creates junctions + patches CMake globs (idempotent)
+node -e "fs.rmSync('android/app/.cxx',{recursive:true,force:true})"   # if a failed build left .cxx behind
+npx expo run:android
+```
+
+What the script does, so you can audit it:
+
+- `react-native-gesture-handler`: junction `node_modules/.../shared/sn` →
+  `shared/shadowNodes/react/renderer/components`, then its `android/CMakeLists.txt`
+  globs sources via `../shared/sn/*.cpp`. The include dir stays on the original
+  `../shared/shadowNodes` path — routing includes through the junction changes the
+  header prefix and breaks `RNGestureHandlerDetector` descriptor resolution.
+- `react-native-safe-area-context`: junction `node_modules/.../cj` →
+  `android/build/generated/source/codegen/jni`, and `LIB_ANDROID_GENERATED_JNI_DIR`
+  is set to `${LIB_ANDROID_DIR}/../cj`.
+
+One manual, machine-local step remains: the Android SDK's bundled cmake ninja
+(`%LOCALAPPDATA%\Android\Sdk\cmake\3.22.1\bin\ninja.exe`) should be 1.13.1+ — keep
+the original as `ninja.exe.bak` when swapping.
+
 ## Visual web lookup (optional)
 
 1. Enable the Vision API in [Google Cloud](https://cloud.google.com/vision/docs/setup) and create an API key.
@@ -108,6 +143,8 @@ modules/
                    # Gemini Nano hook (Android), loaded only in dev builds
 server/
 └─ server.js       # zero-dependency Node lookup proxy
+scripts/
+└─ fix-windows-longpaths.js  # Windows dev-build helper (junction workaround)
 ```
 
 ## Roadmap

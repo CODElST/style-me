@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Chip, ChipRow, EmptyState, PrimaryButton, SectionLabel,
 } from '@/components/kit';
+import { LookNote } from '@/components/look-note';
 import { OutfitCard } from '@/components/outfit-card';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -173,6 +174,7 @@ export default function TodayScreen() {
                         reasons={look.reasons}
                         tags={look.tags}
                         venues={look.venues}
+                        note={<LookNote ctx={context} candidate={look} items={look.items} noteKey={look.key} />}
                         onPressItem={(item) => router.push(`/item/${item.id}`)}
                         footer={(
                           <View style={[styles.actionsRow, { gap: Spacing.two }]}>

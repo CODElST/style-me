@@ -13,6 +13,9 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+modules/styleme-ai/android/build/
+modules/styleme-ai/android/.cxx/
+modules/styleme-ai/ios/build/
 *.p8
 *.p12
 *.key

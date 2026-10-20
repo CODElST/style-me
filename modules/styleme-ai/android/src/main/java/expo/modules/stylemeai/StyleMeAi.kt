@@ -19,9 +19,10 @@ class StyleMeAi : Module() {
       false
     }
 
-    AsyncFunction("describeLookAsync") {
-      (pieces: List<String>, occasion: String, band: String, score: Double) ->
+    AsyncFunction("describeLookAsync") { pieces: List<String>, occasion: String, band: String, score: Double ->
       throw Exception("Gemini Nano bridge not wired up yet — rules engine applies")
+      // unreachable — only here to give the body a String type for codegen
+      @Suppress("UNREACHABLE_CODE") ""
     }
   }
 }
