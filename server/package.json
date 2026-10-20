@@ -1,0 +1,13 @@
+{
+  "name": "styleme-lookup",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stateless StyleMe → Google Cloud Vision (webDetection) proxy.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
