@@ -11,7 +11,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { Chip, Card, IconTextButton, PrimaryButton, Row, SectionLabel, TagPill, Divider } from '@/components/kit';
 import { TagForm, SEASON_LABELS, type TagDraft } from '@/components/tag-form';
 import { pinterestQueriesCloud } from '@/lib/ai';
-import { openPinterest, queriesForItem } from '@/lib/pinterest';
+import { openPinterest, queriesForItem, visualSearchPhoto } from '@/lib/pinterest';
 import { Spacing, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { deleteItem, getItem, markItemsWorn, logWear, saveItem } from '@/lib/db';
@@ -253,7 +253,17 @@ export default function ItemScreen() {
                 icon={pinBusy ? undefined : '🎨'}
                 onPress={() => void askPinQueries()}
               />
+              <IconTextButton
+                label="🔍 Visual search"
+                icon={undefined}
+                onPress={() => void visualSearchPhoto(item.image)}
+              />
             </Row>
+            <Text style={{ color: t.textSecondary, fontSize: 11, marginTop: 4 }}>
+              Search with the real photo: pick Google Lens for “find outfits like this”, or
+              Pinterest to pin it first (a private board works) and lens-search from there. The
+              photo is only shared to what you pick.
+            </Text>
           </Card>
 
           <Divider />

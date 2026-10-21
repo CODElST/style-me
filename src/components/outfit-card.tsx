@@ -6,7 +6,7 @@ import { Chip, GradePill, Row, ScoreRing, TagPill } from './kit';
 import { Spacing, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { itemTitle } from '@/lib/display';
-import { openPinterest, queriesForLook } from '@/lib/pinterest';
+import { openPinterest, queriesForLook, visualSearchPhoto } from '@/lib/pinterest';
 import { occasionOf } from '@/lib/taxonomy';
 import type { Item, OccasionId } from '@/lib/types';
 
@@ -111,17 +111,27 @@ export function OutfitCard(props: OutfitCardProps) {
         {pinOpen ? 'Hide outfit ideas ⌃' : '♟ Outfit ideas on Pinterest  ⌄'}
       </Text>
       {pinOpen ? (
-        <View style={styles.pinChips}>
-          {queriesForLook(items, venues[0] ?? null).map((q) => (
-            <Chip
-              key={q}
-              size="sm"
-              label={q}
-              selected={false}
-              icon="🅿️"
-              onPress={() => void openPinterest(q)}
-            />
-          ))}
+        <View>
+          <View style={styles.pinChips}>
+            {queriesForLook(items, venues[0] ?? null).map((q) => (
+              <Chip
+                key={q}
+                size="sm"
+                label={q}
+                selected={false}
+                icon="🅿️"
+                onPress={() => void openPinterest(q)}
+              />
+            ))}
+          </View>
+          {fashion[0] ? (
+            <Text
+              onPress={() => void visualSearchPhoto(fashion[0].image)}
+              style={{ color: t.textSecondary, fontSize: 12.5, marginTop: Spacing.two }}
+            >
+              🔍 Search by photo instead — style the share to Google Lens or Pinterest
+            </Text>
+          ) : null}
         </View>
       ) : null}
 

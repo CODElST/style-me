@@ -6,6 +6,7 @@
 // rejects the open and we fall back to the in-app browser session).
 
 import { Linking } from 'react-native';
+import * as Sharing from 'expo-sharing';
 import * as WebBrowser from 'expo-web-browser';
 
 import { typeOf, occasionOf } from './taxonomy';
@@ -76,4 +77,22 @@ export async function openPinterest(query: string): Promise<void> {
   } catch {
     void WebBrowser.openBrowserAsync(`https://www.pinterest.com/search/pins/?q=${q}`);
   }
+}
+
+/**
+ * Image-based outfit search via the share sheet: the photo is handed to
+ * whoever the user picks — Google Lens for a true reverse-image search,
+ * Pinterest to pin it (a private board works) and visual-search from there.
+ * This user-driven share is also the ONLY way the photo ever leaves the
+ * device: no upload happens as a side effect of tapping anything else.
+ */
+export async function visualSearchPhoto(imageUri: string): Promise<void> {
+  if (!(await Sharing.isAvailableAsync())) {
+    await WebBrowser.openBrowserAsync('https://lens.google.com');
+    return;
+  }
+  await Sharing.shareAsync(imageUri, {
+    mimeType: 'image/jpeg',
+    dialogTitle: 'Search this photo with… (Google Lens, Pinterest…)',
+  });
 }
