@@ -139,12 +139,23 @@ export default function SettingsScreen() {
               </>
             )}
             {aiModel === 'unavailable' && (
-              <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: Spacing.two }}>
-                Look scoring, pairing and tag suggestions come from the deterministic style engine — color,
-                formality, season and freshness rules that run 100% offline on this phone. Gemini Nano isn&apos;t
-                enabled on this device yet (it needs Android 8+, a locked bootloader and the AICore app from
-                Google Play) — this card will switch automatically when it becomes available.
-              </Text>
+              <>
+                <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: Spacing.two }}>
+                  Look scoring, pairing and tag suggestions come from the deterministic style engine — color,
+                  formality, season and freshness rules that run 100% offline on this phone. Gemini Nano isn&apos;t
+                  enabled on this device yet (it needs Android 8+, a locked bootloader and an up-to-date AICore
+                  app) — after a device restart AICore usually fetches the final configuration within minutes to
+                  a few hours, and this card switches on its own.
+                </Text>
+                <PrimaryButton
+                  label={aiBusy === 'refresh' ? 'Checking…' : 'Check status again'}
+                  onPress={() => {
+                    setAiBusy('refresh');
+                    void loadAi().finally(() => setAiBusy(null));
+                  }}
+                  tone="plain"
+                />
+              </>
             )}
             {aiModel === 'absent' && (
               <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: Spacing.two }}>
