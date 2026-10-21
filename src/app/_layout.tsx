@@ -43,9 +43,17 @@ export default function RootLayout() {
           useSuspense
         >
           <Stack>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="add-item" options={{ presentation: 'modal' }} />
-            <Stack.Screen name="item/[id]" options={{ presentation: 'modal' }} />
+            {/* Headers off everywhere: each screen renders its own header row,
+                so none of them need the generic "item/[id]"-style title bar. */}
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="add-item"
+              options={{ presentation: 'modal', headerShown: false }}
+            />
+            <Stack.Screen
+              name="item/[id]"
+              options={{ presentation: 'modal', headerShown: false }}
+            />
           </Stack>
           <CloudAiSync />
         </SQLiteProvider>

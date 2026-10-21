@@ -80,6 +80,9 @@ export default function AddItemScreen() {
   const idRef = useRef(uid());
   /** true once saveItem succeeded — late-arriving AI desc goes to the DB then. */
   const savedRef = useRef(false);
+
+  /** Set once the user types in the Stylist's notes field (see descDraft). */
+  const descTouchedRef = useRef(false);
   const [step, setStep] = useState<Step>('Photo');
   const [uri, setUri] = useState<string | null>(null);
   const [draft, setDraft] = useState<TagDraft>(toDraftDefault());
@@ -88,6 +91,12 @@ export default function AddItemScreen() {
   const [savingRef, setSavingRef] = useState<string | null>(null);
   /** AI stylist description for the piece being added (arrives mid-edit). */
   const [aiDesc, setAiDesc] = useState('');
+  /**
+   * Stylist desc on its way to the item. `null` means the user hasn't touched
+   * the field yet — AI results may still fill it. Once typed, the user's text
+   * wins over anything the AI lands later.
+   */
+  const [descDraft, setDescDraft] = useState<string | null>(null);
   /** true while the photo-only AI pass settles before the Tags step renders. */
   const [photoAiBusy, setPhotoAiBusy] = useState(false);
 
@@ -118,6 +127,8 @@ export default function AddItemScreen() {
       if (idRef.current !== mine) return;
       if (intel) {
         setAiDesc(intel.desc);
+        // The Tags step has not rendered yet — the field can prefill directly.
+        setDescDraft(intel.desc || null);
         const emptyAuto: AutoTags = {
           subtype: 'tshirt',
           category: 'top',
@@ -219,13 +230,16 @@ export default function AddItemScreen() {
       if (idRef.current !== mine) return;
       if (intel) {
         setAiDesc(intel.desc);
+        // Link flow: the Tags step may already be on screen. Fill only an
+        // untouched field — typed text is the user's own desc and wins.
+        setDescDraft((cur) => cur ?? intel.desc);
         if (Object.keys(intel.tags).length > 0) {
           setDraft((d) => mergeAiTags(d, auto, intel.tags));
           setAutofillNote('AI wrote a stylist description and refined the tags. Review before saving.');
         } else if (intel.desc) {
           setAutofillNote('AI wrote a stylist description. Review the tags before saving.');
         }
-        if (savedRef.current) void setItemDesc(db, mine, intel.desc);
+        if (savedRef.current && !descTouchedRef.current) void setItemDesc(db, mine, intel.desc);
       } else {
         const cfgNow = getCloudAiConfig();
         if (cloudReady(cfgNow)) {
@@ -309,7 +323,7 @@ export default function AddItemScreen() {
       wearCount: 0,
       lastWornAt: null,
       note: draft.note,
-      desc: aiDesc,
+      desc: descDraft ?? aiDesc,
       lookUrl: savingRef,
       refs: refs.slice(0, 3),
       createdAt: now,
@@ -487,6 +501,36 @@ export default function AddItemScreen() {
 
               <Card style={{ marginBottom: Spacing.four }}>
                 <TagForm value={draft} onChange={setDraft} autofillNote={autofillNote} />
+
+                <View style={{ height: Spacing.three }} />
+                <SectionLabel>Stylist&apos;s notes</SectionLabel>
+                <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginBottom: 8 }}>
+                  The AI writes this from the photo or listing when it can. Type your own instead —
+                  whatever is here goes verbatim to the look generator. A few useful lines: colors
+                  and undertone, pattern scale, fabric and weight, vibe, one pairing to try and one
+                  thing to avoid.
+                </Text>
+                <TextInput
+                  value={descDraft ?? ''}
+                  onChangeText={(text) => {
+                    descTouchedRef.current = true;
+                    setDescDraft(text);
+                  }}
+                  placeholder="e.g. oversized navy flannel, brushed cotton, muted checked weave… ground it with a white tee and black jeans; skip other checks."
+                  placeholderTextColor={t.textSecondary}
+                  multiline
+                  textAlignVertical="top"
+                  style={{
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: t.hairline,
+                    borderRadius: 12,
+                    paddingVertical: 10,
+                    paddingHorizontal: 14,
+                    fontSize: 13.5,
+                    minHeight: 96,
+                    color: t.text,
+                  }}
+                />
               </Card>
 
               <Card style={{ marginBottom: Spacing.four }}>

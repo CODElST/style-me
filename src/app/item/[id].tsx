@@ -1,7 +1,7 @@
 // Item detail — inspect, edit tags, wear tracking, web lookup references.
 
 import { Image } from 'expo-image';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useFocusEffect, router } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -27,6 +27,14 @@ export default function ItemScreen() {
   const [draft, setDraft] = useState<TagDraft | null>(null);
   const [busy, setBusy] = useState<'lookup' | null>(null);
   const [refResults, setRefResults] = useState<{ title: string; url: string; source: string }[]>([]);
+  /** Editable stylist desc — mirrors item.desc until the user changes it. */
+  const seenDesc = item?.desc ?? '';
+  const [descDraft, setDescDraft] = useState(seenDesc);
+  const [lastSeenDesc, setLastSeenDesc] = useState(seenDesc);
+  if (lastSeenDesc !== seenDesc) {
+    setLastSeenDesc(seenDesc);
+    setDescDraft(seenDesc);
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -59,6 +67,7 @@ export default function ItemScreen() {
       formality: draft.formality,
       seasons: draft.seasons,
       note: draft.note,
+      desc: descDraft,
       favorite: draft.favorite,
       available: draft.available,
       updatedAt: now(),
@@ -116,6 +125,12 @@ export default function ItemScreen() {
     <View style={{ flex: 1, backgroundColor: t.background }}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <ScrollView contentContainerStyle={styles.pad} showsVerticalScrollIndicator={false}>
+          <Text
+            onPress={() => router.back()}
+            style={{ color: t.textSecondary, fontSize: 13.5, marginBottom: Spacing.three }}
+          >
+            ← Back
+          </Text>
           <Row style={{ justifyContent: 'space-between' }}>
             <Text style={{ color: t.text, fontSize: 24, fontWeight: '700', fontFamily: 'ui-rounded' }}>
               {typeOf(item.subtype).label}
@@ -161,12 +176,31 @@ export default function ItemScreen() {
             {`Worn ${item.wearCount}× · last ${relativeDate(item.lastWornAt)}\nAdded ${relativeDate(item.createdAt)}`}
           </Text>
 
-          {item.desc ? (
-            <View style={{ marginTop: Spacing.three }}>
-              <SectionLabel>Stylist&apos;s notes</SectionLabel>
-              <Text style={{ color: t.text, fontSize: 13.5, lineHeight: 20 }}>{item.desc}</Text>
-            </View>
-          ) : null}
+          <View style={{ marginTop: Spacing.three }}>
+            <SectionLabel>Stylist&apos;s notes</SectionLabel>
+            <Text style={{ color: t.textSecondary, fontSize: 11.5, marginBottom: 6 }}>
+              Fed verbatim to the AI look generator. Written by the AI or edit it to match your own
+              judgment.
+            </Text>
+            <TextInput
+              value={descDraft}
+              onChangeText={setDescDraft}
+              placeholder="Add a few lines: colors, pattern scale, fabric, vibe, pairings…"
+              placeholderTextColor={t.textSecondary}
+              multiline
+              textAlignVertical="top"
+              style={{
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: t.hairline,
+                borderRadius: 12,
+                paddingVertical: 10,
+                paddingHorizontal: 14,
+                fontSize: 13.5,
+                minHeight: 96,
+                color: t.text,
+              }}
+            />
+          </View>
 
           <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.three }}>
             <IconTextButton label="Wear today" icon="👕" onPress={() => void wearToday()} />
