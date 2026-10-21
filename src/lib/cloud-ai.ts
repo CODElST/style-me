@@ -118,36 +118,55 @@ async function toDataUrl(fileUri: string): Promise<string | null> {
 export async function cloudChat(cfg: CloudAiConfig, args: ChatArgs): Promise<string | null> {
   if (!cloudReady(cfg)) return null;
   try {
-    const content: Record<string, unknown>[] = [];
+    // Content is a plain string unless photos actually ride along: Groq's
+    // OpenAI-compatible API rejects string-only messages sent as part arrays
+    // ("messages[1].content must be a string"), while Gemini accepts both.
+    let content: string | Record<string, unknown>[] = args.user;
     if (cfg.photos && args.images?.length) {
+      const parts: Record<string, unknown>[] = [];
       for (const src of args.images.slice(0, 3)) {
         const dataUrl = await toDataUrl(src);
-        if (dataUrl) content.push({ type: 'image_url', image_url: { url: dataUrl } });
+        if (dataUrl) parts.push({ type: 'image_url', image_url: { url: dataUrl } });
+      }
+      if (parts.length) {
+        parts.push({ type: 'text', text: args.user });
+        content = parts;
       }
     }
-    content.push({ type: 'text', text: args.user });
 
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-    const res = await fetch(`${cfg.endpoint.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cfg.key.trim()}`,
-      },
-      body: JSON.stringify({
-        model: cfg.model,
-        messages: [
-          { role: 'system', content: args.system },
-          { role: 'user', content },
-        ],
-        ...(args.json ? { response_format: { type: 'json_object' } } : {}),
-        ...(args.reasoningEffort ? { reasoning_effort: args.reasoningEffort } : {}),
-        max_tokens: args.maxTokens ?? 256,
-        temperature: 0.4,
-      }),
-    }).finally(() => clearTimeout(timer));
+    const url = `${cfg.endpoint.replace(/\/+$/, '')}/chat/completions`;
+    const request = () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+      return fetch(url, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${cfg.key.trim()}`,
+        },
+        body: JSON.stringify({
+          model: cfg.model,
+          messages: [
+            { role: 'system', content: args.system },
+            { role: 'user', content },
+          ],
+          ...(args.json ? { response_format: { type: 'json_object' } } : {}),
+          ...(args.reasoningEffort ? { reasoning_effort: args.reasoningEffort } : {}),
+          max_tokens: args.maxTokens ?? 256,
+          temperature: 0.4,
+        }),
+      }).finally(() => clearTimeout(timer));
+    };
+
+    // One automatic retry for transient capacity errors (Gemini free tier
+    // throws 503 "high demand" spikes; Groq throttles with 429).
+    let res: Response = await request();
+    if (res.status === 503 || res.status === 429) {
+      await new Promise((r) => setTimeout(r, 1_500));
+      res = await request();
+    }
+
     if (!res.ok) {
       // Dev diagnostics — Surface when a member path silently returns null.
       if (__DEV__) {
