@@ -20,7 +20,7 @@ import { cloudReady } from '@/lib/cloud-ai';
 import { pickPhoto, finalizePhoto } from '@/lib/photos';
 import { webLookup } from '@/lib/lookup';
 import { analyzeImageFile, downloadAndPrepare, fetchProduct } from '@/lib/extract';
-import { type ExtractedPage, autoTagsFromProduct, topImages } from '@/lib/product-html';
+import { type AutoTags, type ExtractedPage, autoTagsFromProduct, topImages } from '@/lib/product-html';
 import { typeOf } from '@/lib/taxonomy';
 import type { Item, LookupRef } from '@/lib/types';
 import { uid } from '@/lib/util';
@@ -102,6 +102,31 @@ export default function AddItemScreen() {
       if (!picked) return;
       const stored = await finalizePhoto(picked, idRef.current);
       setUri(stored);
+
+      // Photo-only adds get the same one-time AI pass (no listing text to
+      // send — just the garment picture, when photo consent is on). Its tags
+      // fill only the weak-rule gaps, matching the link flow's merge rules.
+      const mine = idRef.current;
+      const emptyAuto: AutoTags = {
+        subtype: 'tshirt',
+        category: 'top',
+        colors: [],
+        pattern: 'solid',
+        material: null,
+        warmth: 2,
+        formality: 1,
+        seasons: [],
+      };
+      void analyzeItemCloud('', '', stored).then((intel) => {
+        if (!intel || idRef.current !== mine) return;
+        setAiDesc(intel.desc);
+        setDraft((d) => mergeAiTags(d, emptyAuto, intel.tags));
+        setAutofillNote(
+          intel.desc
+            ? 'AI wrote a stylist description from the photo. Review the tags before saving.'
+            : 'Cloud AI had nothing to add for this piece.',
+        );
+      });
     } catch (e) {
       Alert.alert('Photo', `Could not use this photo: ${(e as Error).message}`);
     } finally {
