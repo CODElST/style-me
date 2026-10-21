@@ -15,7 +15,7 @@ import { Spacing, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAppSettings } from '@/hooks/use-settings';
 import { saveItem } from '@/lib/db';
-import { suggestTags } from '@/lib/ai';
+import { suggestTags, suggestTagsNative, type SuggestedProductTags } from '@/lib/ai';
 import { pickPhoto, finalizePhoto } from '@/lib/photos';
 import { webLookup } from '@/lib/lookup';
 import { analyzeImageFile, downloadAndPrepare, fetchProduct } from '@/lib/extract';
@@ -41,6 +41,35 @@ function toDraftDefault(subtype = 'tshirt'): TagDraft {
     favorite: false,
     available: true,
   };
+}
+
+/**
+ * Fill tag gaps with on-device AI results — never fight clear rule matches:
+ *   subtype: only when the rules fell back to the generic 'tshirt'
+ *   material: only when the rules found none
+ *   pattern: only when everything said 'solid' (the weak default)
+ *   colors: only when the rules+pixels found fewer than two colors
+ */
+function mergeAiTags(
+  d: TagDraft,
+  auto: ReturnType<typeof autoTagsFromProduct>,
+  ai: SuggestedProductTags,
+): TagDraft {
+  const merge = { ...d };
+  if (ai.subtype && auto.subtype === 'tshirt' && ai.subtype !== 'tshirt') {
+    merge.subtype = ai.subtype;
+    const def = typeOf(ai.subtype);
+    merge.category = def.category;
+    merge.warmth = def.warmth;
+    merge.formality = def.formality;
+  }
+  if (auto.material == null && ai.material) merge.material = ai.material;
+  if (auto.pattern === 'solid' && ai.pattern && ai.pattern !== 'solid') merge.pattern = ai.pattern;
+  if (auto.colors.length < 2 && ai.colors && ai.colors.length > 0) {
+    const merged = [...ai.colors, ...auto.colors.filter((c) => !ai.colors!.includes(c))];
+    merge.colors = merged.slice(0, 3);
+  }
+  return merge;
 }
 
 export default function AddItemScreen() {
@@ -127,6 +156,18 @@ export default function AddItemScreen() {
       setAutofillNote(
         `Pre-filled from ${page.site ?? 'the product page'} — review type, colors and warmth before saving.`,
       );
+
+      // Progressive on-device AI refinement: rules tags are already applied;
+      // Gemini Nano (photo + listing text) fills only the gaps the rules left.
+      const mine = idRef.current;
+      const aiTags = await suggestTagsNative(page.title ?? '', page.text, stored);
+      if (!aiTags || idRef.current !== mine) return;
+      setDraft((d) => mergeAiTags(d, auto, aiTags));
+      if (Object.keys(aiTags).length > 0) {
+        setAutofillNote(
+          'Pre-filled from the page; on-device AI refined the tags using the photo. Review before saving.',
+        );
+      }
     } catch (e) {
       Alert.alert('Link', `Could not use that image: ${(e as Error).message}`);
     } finally {

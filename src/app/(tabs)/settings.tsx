@@ -10,7 +10,7 @@ import { Card, Divider, PrimaryButton, Row, SectionLabel } from '@/components/ki
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAppSettings } from '@/hooks/use-settings';
-import { getAiStatus } from '@/lib/ai';
+import { enableOnDeviceModel, getAiModelStatus, type AiModelStatus } from '@/lib/ai';
 import { getStats, listItems } from '@/lib/db';
 import { deletePhoto } from '@/lib/photos';
 
@@ -19,13 +19,37 @@ export default function SettingsScreen() {
   const db = useSQLiteContext();
   const { settings, update } = useAppSettings();
   const [stats, setStats] = useState<{ total: number; outfits: number; wearsLogged: number } | null>(null);
-  const ai = getAiStatus();
+  const [aiModel, setAiModel] = useState<AiModelStatus>('absent');
+  const [aiBusy, setAiBusy] = useState<'download' | 'refresh' | null>(null);
+  const loadAi = useCallback(async () => {
+    setAiModel(await getAiModelStatus());
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       void getStats(db).then(setStats);
-    }, [db]),
+      void loadAi();
+    }, [db, loadAi]),
   );
+
+  const downloadModel = async () => {
+    setAiBusy('download');
+    try {
+      const ok = await enableOnDeviceModel();
+      const state = await getAiModelStatus();
+      setAiModel(state);
+      if (ok) {
+        Alert.alert('On-device AI ready', 'The engine is now Rules + on-device AI. Everything keeps running locally on this phone.');
+      }
+    } catch (e) {
+      Alert.alert(
+        'On-device AI',
+        `Couldn't download the model: ${(e as Error).message}\n\nThis needs a supported phone (Android 8+, locked bootloader, AICore installed via Google Play) and a network connection — the rules engine keeps working meanwhile.`,
+      );
+    } finally {
+      setAiBusy(null);
+    }
+  };
 
   // Keep the endpoint field in sync with the stored value (unless being edited).
   // Synchronous render-phase adjustment acc. to react.dev — no effect needed.
@@ -73,14 +97,62 @@ export default function SettingsScreen() {
             <Row style={{ justifyContent: 'space-between', paddingVertical: 2 }}>
               <Text style={{ color: t.textSecondary }}>Engine now running on this phone</Text>
               <Text style={{ color: t.accent, fontWeight: '700' }}>
-                {ai.nativeAvailable ? 'Rules + on-device AI' : 'Rules engine (offline)'}
+                {aiModel === 'available' ? 'Rules + on-device AI' : 'Rules engine (offline)'}
               </Text>
             </Row>
-            <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: Spacing.two }}>
-              {ai.nativeAvailable
-                ? 'Your phone\'s built-in AI (Apple Intelligence / Gemini Nano) is active. Look scoring and pairing always come from the deterministic style engine; the AI only refines phrasing and tag suggestions — fully on device, no network.'
-                : 'Look scoring, pairing and tag suggestions come from the deterministic style engine — color, formality, season and freshness rules that run 100% offline on this phone. No AI model is active here yet: when the on-device bridge (Apple Intelligence / Gemini Nano) becomes available on a supported build, this card will say so, and it only ever upgrades wording — never a hard dependency.\n\nNew: adding items by product link also parses and tags on device; nothing goes through a server.'}
-            </Text>
+            {aiModel === 'available' && (
+              <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: Spacing.two }}>
+                Your phone&apos;s built-in Gemini Nano is active, entirely on device — no network, nothing leaves this
+                phone. Look scoring and pairing always come from the deterministic style engine; the AI refines the
+                look phrasing and helps fill tags when you add an item. It never changes your scores or acts as a
+                hard dependency.
+              </Text>
+            )}
+            {aiModel === 'downloadable' && (
+              <>
+                <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: Spacing.two }}>
+                  This phone supports Gemini Nano, but its model hasn&apos;t been downloaded yet. It&apos;s a one-time,
+                  free ~2 GB download through Google AICore — after that everything runs locally, forever offline.
+                </Text>
+                <PrimaryButton
+                  label={aiBusy === 'download' ? 'Downloading model…' : 'Download on-device model'}
+                  onPress={() => void downloadModel()}
+                  disabled={aiBusy === 'download'}
+                  tone="plain"
+                />
+              </>
+            )}
+            {aiModel === 'downloading' && (
+              <>
+                <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: Spacing.two }}>
+                  The Gemini Nano model is downloading right now (through Google AICore). Keep this phone online and
+                  come back in a while — then the engine switches itself to Rules + on-device AI.
+                </Text>
+                <PrimaryButton
+                  label={aiBusy === 'refresh' ? 'Checking…' : 'Check status again'}
+                  onPress={() => {
+                    setAiBusy('refresh');
+                    void loadAi().finally(() => setAiBusy(null));
+                  }}
+                  tone="plain"
+                />
+              </>
+            )}
+            {aiModel === 'unavailable' && (
+              <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: Spacing.two }}>
+                Look scoring, pairing and tag suggestions come from the deterministic style engine — color,
+                formality, season and freshness rules that run 100% offline on this phone. Gemini Nano isn&apos;t
+                enabled on this device yet (it needs Android 8+, a locked bootloader and the AICore app from
+                Google Play) — this card will switch automatically when it becomes available.
+              </Text>
+            )}
+            {aiModel === 'absent' && (
+              <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: Spacing.two }}>
+                Look scoring, pairing and tag suggestions come from the deterministic style engine — color,
+                formality, season and freshness rules that run 100% offline on this phone. The on-device AI bridge
+                (Gemini Nano) isn&apos;t compiled into this build — it activates on the native app build.
+              </Text>
+            )}
           </Card>
 
           <Card style={{ marginBottom: Spacing.four }}>

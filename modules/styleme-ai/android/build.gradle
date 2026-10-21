@@ -22,3 +22,8 @@ android {
     abortOnError false
   }
 }
+
+dependencies {
+  // Gemini Nano via AICore — on-device Prompt API (requires Android 8.0+).
+  implementation 'com.google.mlkit:genai-prompt:1.0.0-beta4'
+}

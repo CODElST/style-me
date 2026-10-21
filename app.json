@@ -43,7 +43,8 @@
           "cameraPermission": "StyleMe needs camera access to photograph garments.",
           "microphonePermission": false
         }
-      ]
+      ],
+      "./plugins/with-styleme-genai"
     ],
     "extra": {
       "lookupEndpoint": ""
