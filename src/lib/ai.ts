@@ -79,7 +79,7 @@ export function fallbackConfigOf(primary: CloudAiConfig): CloudAiConfig | null {
   const primaryId = (Object.entries(AI_PRESETS).find(
     ([, p]) => p.endpoint === primary.endpoint,
   )?.[0] ?? null) as CloudPresetId | null;
-  const order: CloudPresetId[] = primaryId === 'gemini' ? ['groq'] : ['gemini', 'groq'];
+  const order: CloudPresetId[] = primaryId === 'groq' ? [] : ['groq'];
   for (const id of order) {
     const key = HARDCODED_KEYS[id];
     if (!key) continue;
@@ -98,19 +98,25 @@ export function fallbackConfigOf(primary: CloudAiConfig): CloudAiConfig | null {
 
 /**
  * Fire on the configured provider; on failure, retry on the fallback. When
- * the call NEEDS images and the fallback is Groq's text-only default (gpt-
- * oss), the request re-routes to Groq's single vision model so the visual
+ * the call CARRIES images and the configured model is Groq's text-only
+ * default (gpt-oss), the request re-routes to Groq's single vision model
+ * (qwen3.8-27b) — first attempt, not just on failure — so the visual
  * judgment is never silently skipped.
  */
 async function chatWithFallback(args: Parameters<typeof cloudChat>[1]): Promise<string | null> {
   const primary = cloud;
   if (!primary || !cloudReady(primary)) return null;
-  const first = await cloudChat(primary, args).catch(() => null);
+
+  let target = primary;
+  const needsImages = (args.images?.length ?? 0) > 0;
+  if (needsImages && !primary.vision) {
+    target = { ...primary, model: GROQ_VISION_MODEL, vision: true };
+  }
+  const first = await cloudChat(target, args).catch(() => null);
   if (first) return first;
 
   const fallback = fallbackConfigOf(primary);
   if (!fallback || !cloudReady(fallback)) return null;
-  const needsImages = (args.images?.length ?? 0) > 0 && primary.vision;
   const isGroq = /api\.groq\.com/.test(fallback.endpoint);
   const retryOn = needsImages && isGroq && !fallback.vision
     ? { ...fallback, model: GROQ_VISION_MODEL, vision: true }

@@ -8,7 +8,7 @@ import { useEffect } from 'react';
 import { useAppSettings } from '@/hooks/use-settings';
 import { setCloudAiConfig } from '@/lib/ai';
 // Local-only fallbacks (git-ignored); deleted once keys become user input.
-import { HARDCODED_CLOUD_MODEL, HARDCODED_KEYS } from '@/lib/cloud-ai.local';
+import { HARDCODED_KEYS } from '@/lib/cloud-ai.local';
 import { AI_PRESETS, cloudConfigOf, presetSupportsVision, type CloudPresetId } from '@/lib/cloud-ai';
 
 export function CloudAiSync() {
@@ -17,12 +17,13 @@ export function CloudAiSync() {
   useEffect(() => {
     if (!settings) return;
     // Priority: user-entered values → local hardcoded key → provider presets.
-    const endpoint = settings.cloudAiEndpoint || AI_PRESETS.gemini.endpoint;
+    // Groq is the provider of record.
+    const endpoint = settings.cloudAiEndpoint || AI_PRESETS.groq.endpoint;
     // The key must match the ACTIVE provider; resolve which preset is live.
     const presetId = (
-      (Object.entries(AI_PRESETS).find(([, p]) => p.endpoint === endpoint)?.[0] ?? 'gemini')
+      (Object.entries(AI_PRESETS).find(([, p]) => p.endpoint === endpoint)?.[0] ?? 'groq')
     ) as CloudPresetId;
-    const model = settings.cloudAiModel || HARDCODED_CLOUD_MODEL || AI_PRESETS.gemini.model;
+    const model = settings.cloudAiModel || AI_PRESETS.groq.model;
     setCloudAiConfig(
       cloudConfigOf(
         settings.cloudAiEnabled,

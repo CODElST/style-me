@@ -88,6 +88,8 @@ export default function AddItemScreen() {
   const [savingRef, setSavingRef] = useState<string | null>(null);
   /** AI stylist description for the piece being added (arrives mid-edit). */
   const [aiDesc, setAiDesc] = useState('');
+  /** true while the photo-only AI pass settles before the Tags step renders. */
+  const [photoAiBusy, setPhotoAiBusy] = useState(false);
 
   // product-link state
   const [linkInput, setLinkInput] = useState('');
@@ -103,34 +105,43 @@ export default function AddItemScreen() {
       const stored = await finalizePhoto(picked, idRef.current);
       setUri(stored);
 
-      // Photo-only adds get the same one-time AI pass (no listing text to
-      // send — just the garment picture, when photo consent is on). Its tags
-      // fill only the weak-rule gaps, matching the link flow's merge rules.
+      // One-time AI pass BEFORE the user reaches the Tags step: the tags page
+      // is then rendered with the final merged tags (no late mutations).
+      // The 20 s cap keeps the flow moving on a bad network or a hung model.
       const mine = idRef.current;
-      const emptyAuto: AutoTags = {
-        subtype: 'tshirt',
-        category: 'top',
-        colors: [],
-        pattern: 'solid',
-        material: null,
-        warmth: 2,
-        formality: 1,
-        seasons: [],
-      };
-      void analyzeItemCloud('', '', stored).then((intel) => {
-        if (!intel || idRef.current !== mine) return;
+      setPhotoAiBusy(true);
+      const intel = await Promise.race([
+        analyzeItemCloud('', '', stored),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 20_000)),
+      ]);
+      setPhotoAiBusy(false);
+      if (idRef.current !== mine) return;
+      if (intel) {
         setAiDesc(intel.desc);
+        const emptyAuto: AutoTags = {
+          subtype: 'tshirt',
+          category: 'top',
+          colors: [],
+          pattern: 'solid',
+          material: null,
+          warmth: 2,
+          formality: 1,
+          seasons: [],
+        };
         setDraft((d) => mergeAiTags(d, emptyAuto, intel.tags));
         setAutofillNote(
           intel.desc
-            ? 'AI wrote a stylist description from the photo. Review the tags before saving.'
+            ? 'AI wrote a stylist description from the photo and refined the tags. Review before saving.'
             : 'Cloud AI had nothing to add for this piece.',
         );
-      });
+      }
+      // Render the tags page now — already carrying the AI refinements.
+      goTags();
     } catch (e) {
       Alert.alert('Photo', `Could not use this photo: ${(e as Error).message}`);
     } finally {
       setBusy(null);
+      setPhotoAiBusy(false);
     }
   };
 
@@ -353,7 +364,13 @@ export default function AddItemScreen() {
                     <Row style={{ gap: Spacing.two, marginTop: Spacing.three }}>
                       <IconTextButton label="Camera" icon="📷" onPress={() => void addPhoto('camera')} />
                       <IconTextButton label="Library" icon="🖼️" onPress={() => void addPhoto('library')} />
-                      <PrimaryButton label="Looks right →" onPress={goTags} />
+                      {photoAiBusy ? (
+                        <Text style={{ color: t.textSecondary, fontSize: 12, textAlignVertical: 'center' }}>
+                          ✦ AI is studying this piece…
+                        </Text>
+                      ) : (
+                        <PrimaryButton label="Looks right →" onPress={goTags} />
+                      )}
                     </Row>
                   </>
                 ) : (

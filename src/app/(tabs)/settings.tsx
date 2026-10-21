@@ -13,7 +13,7 @@ import { useAppSettings } from '@/hooks/use-settings';
 import { enableOnDeviceModel, getAiModelStatus, type AiModelStatus } from '@/lib/ai';
 import { AI_PRESETS, cloudChat, cloudConfigOf, presetSupportsVision, type CloudPresetId } from '@/lib/cloud-ai';
 // Local-only fallbacks (git-ignored) — removed once the key becomes user input.
-import { HARDCODED_CLOUD_MODEL, HARDCODED_KEYS } from '@/lib/cloud-ai.local';
+import { HARDCODED_KEYS } from '@/lib/cloud-ai.local';
 import { getStats, listItems } from '@/lib/db';
 import { deletePhoto } from '@/lib/photos';
 
@@ -90,16 +90,16 @@ export default function SettingsScreen() {
   }
 
   const testCloud = async () => {
-    const endpoint = settings?.cloudAiEndpoint || AI_PRESETS.gemini.endpoint;
-    const model = settings?.cloudAiModel || HARDCODED_CLOUD_MODEL || AI_PRESETS.gemini.model;
+    const endpoint = settings?.cloudAiEndpoint || AI_PRESETS.groq.endpoint;
+    const model = settings?.cloudAiModel || AI_PRESETS.groq.model;
     // Same priority as CloudAiSync; the key must belong to the active provider.
     const presetId = (
-      (Object.entries(AI_PRESETS).find(([, p]) => p.endpoint === endpoint)?.[0] ?? 'gemini')
+      (Object.entries(AI_PRESETS).find(([, p]) => p.endpoint === endpoint)?.[0] ?? 'groq')
     ) as CloudPresetId;
     const key = (keyDraft || storedKey || HARDCODED_KEYS[presetId] || '').trim();
     const vision = presetSupportsVision(endpoint, model);
     if (!key) {
-      Alert.alert('Cloud AI', 'Paste an API key first — get one free at aistudio.google.com/apikey');
+      Alert.alert('Cloud AI', 'Paste an API key first — get one free at console.groq.com/keys');
       return;
     }
     setCloudBusy(true);
@@ -110,7 +110,7 @@ export default function SettingsScreen() {
       );
       Alert.alert(
         'Cloud AI',
-        reply ? `Connected — ${model} replied: "${reply}"` : `No reply from ${model}. Check the model name, the key (from ${AI_PRESETS.gemini.keyUrl}) and your network.`,
+        reply ? `Connected — ${model} replied: "${reply}"` : `No reply from ${model}. Check the model name, the key (from ${AI_PRESETS.groq.keyUrl}) and your network.`,
       );
     } finally {
       setCloudBusy(false);
@@ -244,24 +244,24 @@ export default function SettingsScreen() {
             <Divider />
             <Text style={{ color: t.text, marginBottom: 6 }}>Provider</Text>
             <ChipRow>
-              {(['gemini', 'openrouter', 'groq'] as const).map((id) => (
+              {(['groq', 'openrouter'] as const).map((id) => (
                 <Chip
                   key={id}
                   size="sm"
                   label={AI_PRESETS[id].label}
                   selected={
-                    (cloudEpDraft || AI_PRESETS.gemini.endpoint) === AI_PRESETS[id].endpoint
+                    (cloudEpDraft || AI_PRESETS.groq.endpoint) === AI_PRESETS[id].endpoint
                   }
                   onPress={() => {
                     setCloudEpDraft(AI_PRESETS[id].endpoint);
-                    setModelDraft(id === 'gemini' ? HARDCODED_CLOUD_MODEL : AI_PRESETS[id].model);
+                    setModelDraft(AI_PRESETS[id].model);
                   }}
                 />
               ))}
             </ChipRow>
             <Text style={{ color: t.textSecondary, fontSize: 11.5, marginTop: 4 }}>
               Chips prefill endpoint + model below. Keys must match the provider — leave empty
-              to use the built-in local keys for Gemini and Groq.
+              to use the built-in local Groq key.
             </Text>
             <Row style={{ marginTop: Spacing.three, justifyContent: 'space-between' }}>
               <Text style={{ color: t.text }}>Use cloud AI</Text>
@@ -294,7 +294,7 @@ export default function SettingsScreen() {
             <TextInput
               value={cloudEpDraft}
               onChangeText={setCloudEpDraft}
-              placeholder={AI_PRESETS.gemini.endpoint}
+              placeholder={AI_PRESETS.groq.endpoint}
               placeholderTextColor={t.textSecondary}
               autoCapitalize="none"
               autoCorrect={false}
@@ -304,7 +304,7 @@ export default function SettingsScreen() {
             <TextInput
               value={modelDraft}
               onChangeText={setModelDraft}
-              placeholder={AI_PRESETS.gemini.model}
+              placeholder={AI_PRESETS.groq.model}
               placeholderTextColor={t.textSecondary}
               autoCapitalize="none"
               autoCorrect={false}
