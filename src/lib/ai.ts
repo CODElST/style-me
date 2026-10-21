@@ -419,10 +419,10 @@ export async function analyzeItemCloud(
       'You are a fashion archivist and personal stylist. Study the garment photo (if attached) and the listing text carefully. Reply with JSON only.',
     user:
       `Product title: ${title.slice(0, 160)}\nListing text: ${pageText.slice(0, 900)}\n\n` +
-      'Write "desc": a concise, opinionated stylist description (max 55 words) of this garment — ' +
-      'what it is, exact colors (naming undertone and saturation), the pattern and its scale, the fabric/weight ' +
-      'impression, the vibe and formality register, and finish with 1–2 concrete pairing ideas ' +
-      '(e.g. "pairs with cream chinos and loafers; skip busy tops").\n\n' +
+      'Write "desc": an opinionated stylist brief (about 100 words) of this garment, in flowing prose that covers, in order: ' +
+      'what the piece is and its silhouette; the exact colors (name undertone and saturation); the pattern and its scale; ' +
+      'the fabric/weight/drape impression; the vibe and formality register; 1–2 concrete pairing ideas ' +
+      '(e.g. "ground it with cream chinos and loafers"); and one thing to avoid pairing it with.\n\n' +
       'Then "tags": {"subtype":"...","material":"...","pattern":"...","colors":["..."]} where each value ' +
       'must use ONLY these ids — types=[' + TYPE_IDS.join(',') + '], materials=[' + MATERIAL_IDS.join(',') +
       '], patterns=[' + PATTERN_IDS.join(',') + '], colors=[' + COLOR_IDS.join(',') + ']. ' +
@@ -430,8 +430,8 @@ export async function analyzeItemCloud(
     images: imageUri && cfg.photos ? [imageUri] : [],
     json: true,
     reasoningEffort: 'low',
-    maxTokens: 700,
-  } as Parameters<typeof cloudChat>[1]);
+    maxTokens: 900,
+  });
   if (!raw) return null;
   const json = sliceJson(raw);
   if (!json) return null;
@@ -505,7 +505,7 @@ function itemCatalog(items: Item[], aliasOf: Map<Item, string>): string {
         it.seasons.join('/'),
         it.favorite ? 'favorite' : null,
         worn,
-        it.desc ? `AI notes: ${it.desc.slice(0, 200)}` : null,
+        it.desc ? `AI notes: ${it.desc.slice(0, 260)}` : null,
         it.note ? `owner note: ${it.note.slice(0, 60)}` : null,
       ].filter(Boolean);
       return bits.join(', ');
