@@ -14,8 +14,8 @@ import { TagForm, type TagDraft } from '@/components/tag-form';
 import { Spacing, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAppSettings } from '@/hooks/use-settings';
-import { saveItem } from '@/lib/db';
-import { suggestTags, suggestTagsNative, suggestTagsCloud, type SuggestedProductTags } from '@/lib/ai';
+import { saveItem, setItemDesc } from '@/lib/db';
+import { analyzeItemCloud, suggestTags, suggestTagsNative, suggestTagsCloud, type SuggestedProductTags } from '@/lib/ai';
 import { pickPhoto, finalizePhoto } from '@/lib/photos';
 import { webLookup } from '@/lib/lookup';
 import { analyzeImageFile, downloadAndPrepare, fetchProduct } from '@/lib/extract';
@@ -77,12 +77,16 @@ export default function AddItemScreen() {
   const db = useSQLiteContext();
   const { settings, update } = useAppSettings();
   const idRef = useRef(uid());
+  /** true once saveItem succeeded — late-arriving AI desc goes to the DB then. */
+  const savedRef = useRef(false);
   const [step, setStep] = useState<Step>('Photo');
   const [uri, setUri] = useState<string | null>(null);
   const [draft, setDraft] = useState<TagDraft>(toDraftDefault());
   const [busy, setBusy] = useState<'pick' | 'save' | 'lookup' | 'fetchLink' | 'useLink' | null>(null);
   const [refs, setRefs] = useState<(LookupRef)[]>([]);
   const [savingRef, setSavingRef] = useState<string | null>(null);
+  /** AI stylist description for the piece being added (arrives mid-edit). */
+  const [aiDesc, setAiDesc] = useState('');
 
   // product-link state
   const [linkInput, setLinkInput] = useState('');
@@ -159,17 +163,32 @@ export default function AddItemScreen() {
 
       // Progressive AI refinement: rules tags are already applied; Nano
       // (photo + listing text) fills only the gaps the rules left, then the
-      // cloud model fills anything still missing — both strictly opt-in.
+      // cloud intel call (desc + tags in one) fills the rest — all opt-in.
       const mine = idRef.current;
       let aiTags = await suggestTagsNative(page.title ?? '', page.text, stored);
       if (!aiTags || Object.keys(aiTags).length === 0) {
-        aiTags = await suggestTagsCloud(page.title ?? '', page.text, stored);
+        aiTags = (await suggestTagsCloud(page.title ?? '', page.text, stored)) ?? null;
       }
-      if (!aiTags || idRef.current !== mine) return;
-      setDraft((d) => mergeAiTags(d, auto, aiTags!));
-      if (Object.keys(aiTags).length > 0) {
-        setAutofillNote('Pre-filled from the page; AI refined the tags. Review before saving.');
+      if (aiTags && idRef.current === mine) {
+        setDraft((d) => mergeAiTags(d, auto, aiTags!));
+        if (Object.keys(aiTags).length > 0) {
+          setAutofillNote('Pre-filled from the page; AI refined the tags. Review before saving.');
+        }
       }
+
+      // The AI stylist description — authored ONCE here (photo + listing are
+      // studied in the same pass when photo consent is on), stored on the item
+      // and later reused as plain text by the outfit styler. Its tags also
+      // fill any gaps the earlier passes left.
+      const intel = await analyzeItemCloud(page.title ?? '', page.text, stored);
+      if (!intel || idRef.current !== mine) return;
+      setAiDesc(intel.desc);
+      if (Object.keys(intel.tags).length > 0) {
+        setDraft((d) => mergeAiTags(d, auto, intel.tags));
+        setAutofillNote('AI wrote a stylist description and refined the tags. Review before saving.');
+      }
+      // If the item is already saved (user was fast), the desc lands afterward.
+      if (savedRef.current) void setItemDesc(db, mine, intel.desc);
     } catch (e) {
       Alert.alert('Link', `Could not use that image: ${(e as Error).message}`);
     } finally {
@@ -243,6 +262,7 @@ export default function AddItemScreen() {
       wearCount: 0,
       lastWornAt: null,
       note: draft.note,
+      desc: aiDesc,
       lookUrl: savingRef,
       refs: refs.slice(0, 3),
       createdAt: now,
@@ -250,6 +270,7 @@ export default function AddItemScreen() {
     };
     try {
       await saveItem(db, item);
+      savedRef.current = true;
       router.back();
     } catch (e) {
       Alert.alert('Save', `Could not save: ${(e as Error).message}`);

@@ -19,9 +19,28 @@
 
 import type { ModelStatus } from '../../modules/styleme-ai';
 import type { NativeBridge } from './ai-bridge';
+import { evaluateLook } from './engine';
 import { cloudChat, cloudReady, sliceJson, type CloudAiConfig } from './cloud-ai';
-import { MATERIALS, PALETTE, PATTERNS, TYPES, bandOf, occasionOf, suggestSeasons, typeOf } from './taxonomy';
-import type { ColorId, Item, MaterialId, OutfitCandidate, PatternId, StyleContext } from './types';
+import {
+  FORMALITY_LABELS,
+  MATERIALS,
+  PALETTE,
+  PATTERNS,
+  TYPES,
+  bandOf,
+  occasionOf,
+  suggestSeasons,
+  typeOf,
+} from './taxonomy';
+import type {
+  ColorId,
+  Item,
+  LookSlots,
+  MaterialId,
+  OutfitCandidate,
+  PatternId,
+  StyleContext,
+} from './types';
 
 // Lazy, failure-safe load of the optional native bridge. On Expo Go or web
 // `requireNativeModule` throws and we stay with the rules engine.
@@ -295,4 +314,242 @@ export async function suggestTagsCloud(
   } catch {
     return null;
   }
+}
+
+// ------------------------------------------------- per-item AI intelligence
+//
+// The vision work happens exactly once per item, at add time: the model sees
+// the garment photo (only when the photo toggle is on) plus the page's listing
+// text and writes TWO things in one call — a rich stylist description (stored
+// on the item forever) and the normalized taxonomy tags (used to prefill the
+// form). Everything downstream (tag prefill for photo-only adds, and the
+// outfit styler in the Today flow) then runs purely on TEXT.
+
+export interface ItemIntel {
+  /** opinionated stylist description, ≤ ~55 words */
+  desc: string;
+  /** normalized taxonomy tags extracted from the same look/listening pass */
+  tags: SuggestedProductTags;
+}
+
+/**
+ * One multimodal call: description + tags, from photo + listing text.
+ * With the photo toggle off the call still runs on listing text alone.
+ * Any failure (network, quota, weird reply) returns null — the caller falls
+ * back to the rules tags, and the item simply keeps an empty desc.
+ */
+export async function analyzeItemCloud(
+  title: string,
+  pageText: string,
+  imageUri?: string | null,
+): Promise<ItemIntel | null> {
+  const cfg = cloud;
+  if (!cfg || !cloudReady(cfg)) return null;
+  const raw = await cloudChat(cfg, {
+    system:
+      'You are a fashion archivist and personal stylist. Study the garment photo (if attached) and the listing text carefully. Reply with JSON only.',
+    user:
+      `Product title: ${title.slice(0, 160)}\nListing text: ${pageText.slice(0, 900)}\n\n` +
+      'Write "desc": a concise, opinionated stylist description (max 55 words) of this garment — ' +
+      'what it is, exact colors (naming undertone and saturation), the pattern and its scale, the fabric/weight ' +
+      'impression, the vibe and formality register, and finish with 1–2 concrete pairing ideas ' +
+      '(e.g. "pairs with cream chinos and loafers; skip busy tops").\n\n' +
+      'Then "tags": {"subtype":"...","material":"...","pattern":"...","colors":["..."]} where each value ' +
+      'must use ONLY these ids — types=[' + TYPE_IDS.join(',') + '], materials=[' + MATERIAL_IDS.join(',') +
+      '], patterns=[' + PATTERN_IDS.join(',') + '], colors=[' + COLOR_IDS.join(',') + ']. ' +
+      'Judge the real color, pattern and scale from the photo when one is attached; the listing text is secondary.',
+    images: imageUri && cfg.photos ? [imageUri] : [],
+    json: true,
+    reasoningEffort: 'low',
+    maxTokens: 700,
+  });
+  if (!raw) return null;
+  const json = sliceJson(raw);
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as Record<string, unknown>;
+    const desc = typeof parsed.desc === 'string' ? parsed.desc.trim() : '';
+    const tags = validateTagJson(parsed);
+    if (!desc && Object.keys(tags).length === 0) return null;
+    return { desc, tags };
+  } catch {
+    return null;
+  }
+}
+
+// --------------------------------------------------------- AI outfit styler
+//
+// decideWithAI: given the whole available closet as TEXT (structured attrs +
+// the AI-written descriptions), the model judges what should be worn together
+// — neutrals anchoring, one accent, pattern scale, formality register, warmth,
+// freshness — and returns complete looks. Results are re-run through the
+// deterministic evaluator so the score ring stays honest, and any failure
+// returns [] (the rules engine's looks stay on screen, unharmed).
+
+const PICK_SYSTEM =
+  'You are a personal stylist with strong, opinionated taste in color harmony, pattern pairing, formality and dressing for the weather. Reply with JSON only.';
+
+interface RawLook {
+  items?: unknown[];
+  dress?: unknown;
+  shoes?: unknown;
+  outer?: unknown;
+  extra?: unknown;
+  thought?: unknown;
+}
+
+const LOOK_RULES = (band: string): string =>
+  'Craft rules:\n' +
+  '- Anchor the look in neutrals; ONE saturated accent color at most; two loud colors competing is a fail.\n' +
+  '- At most one patterned piece unless the combination is an obviously intentional, scale-aware pairing.\n' +
+  `- Keep every piece in the same formality register as the occasion.\n` +
+  `- Dress for ${band} weather using each piece's warmth; add an outer layer only when it genuinely helps.\n` +
+  '- Rotate: prefer pieces not worn in the past week, unless a favorite truly elevates the look.\n' +
+  '- Use the AI descriptions when present — they name real undertones, pattern scale and pairing ideas — and follow their pairing advice when consistent.';
+
+const LOOK_SHAPE =
+  'Reply with JSON only: {"looks":[{"items":["n3","n9"],"shoes":"n12","outer":null,"dress":null,"extra":null,"thought":"<max 20 words on why this pairing works>"}]} ' +
+  '— "items" holds two ids (top + bottom) and is empty when a dress id is used instead; use JSON null for absent outer/extra.';
+
+/** Compact, id-aliased closet catalogue for the text-only stylist call. */
+function itemCatalog(items: Item[], aliasOf: Map<Item, string>): string {
+  return items
+    .map((it) => {
+      const a = aliasOf.get(it) ?? '?';
+      const formality = FORMALITY_LABELS[it.formality] ?? `level ${it.formality}`;
+      const days = it.lastWornAt != null ? Math.round((Date.now() - it.lastWornAt) / 86_400_000) : -1;
+      const worn =
+        it.wearCount === 0
+          ? 'never worn'
+          : days >= 0
+            ? `worn ${it.wearCount}x, last ${days}d ago`
+            : `worn ${it.wearCount}x`;
+      const bits = [
+        `id ${a}`,
+        typeOf(it.subtype).label.toLowerCase(),
+        `(category: ${it.category})`,
+        it.colors.join('+'),
+        it.pattern,
+        it.material ?? 'unknown material',
+        `warmth ${it.warmth}/5`,
+        `formality ${formality}`,
+        it.seasons.join('/'),
+        it.favorite ? 'favorite' : null,
+        worn,
+        it.desc ? `AI notes: ${it.desc.slice(0, 200)}` : null,
+        it.note ? `owner note: ${it.note.slice(0, 60)}` : null,
+      ].filter(Boolean);
+      return bits.join(', ');
+    })
+    .join('\n');
+}
+
+function parseRawLooks(raw: string | null): RawLook[] {
+  if (!raw) return [];
+  const json = sliceJson(raw);
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as { looks?: unknown };
+    return Array.isArray(parsed.looks) ? (parsed.looks as RawLook[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function toSlots(byAlias: Map<string, Item>, raw: RawLook): LookSlots | null {
+  const pick = (v: unknown): Item | undefined => (typeof v === 'string' ? byAlias.get(v) : undefined);
+  const pieces = (Array.isArray(raw.items) ? raw.items : [])
+    .map((v) => pick(v))
+    .filter((i): i is Item => i !== undefined);
+  const top = pieces.find((i) => i.category === 'top');
+  const bottom = pieces.find((i) => i.category === 'bottom');
+  const dress = pick(raw.dress);
+  const shoes = pick(raw.shoes);
+  if (!dress && !(top && bottom)) return null;
+  if (!shoes) return null;
+  const slots: LookSlots = { shoes };
+  if (dress) slots.dress = dress;
+  else {
+    slots.top = top;
+    slots.bottom = bottom;
+  }
+  const outer = pick(raw.outer);
+  if (outer) slots.outer = outer;
+  const extra = pick(raw.extra);
+  if (extra) slots.extra = extra;
+  return slots;
+}
+
+/** Validate AI picks against the deterministic evaluator; truth scores stay honest. */
+function toCandidates(
+  ctx: StyleContext,
+  byAlias: Map<string, Item>,
+  raws: RawLook[],
+): OutfitCandidate[] {
+  const out: OutfitCandidate[] = [];
+  const seen = new Set<string>();
+  for (const raw of raws) {
+    const slots = toSlots(byAlias, raw);
+    if (!slots) continue;
+    const candidate = evaluateLook(ctx, slots);
+    if (!candidate) continue;
+    if (seen.has(candidate.key)) continue;
+    seen.add(candidate.key);
+    const thought =
+      typeof raw.thought === 'string' && raw.thought.trim().length > 3 ? raw.thought.trim() : null;
+    out.push({
+      ...candidate,
+      reasons: thought
+        ? [thought, ...candidate.reasons.filter((r) => r !== thought)].slice(0, 3)
+        : candidate.reasons,
+      aiNote: thought ?? undefined,
+    });
+  }
+  return out;
+}
+
+export interface PickLooksOptions {
+  /** how many finalized looks to hand back (default 3, cap 5) */
+  count?: number;
+  /** item ids to steer AWAY from (e.g. just worn); may be ignored */
+  avoid?: string[];
+}
+
+/**
+ * The AI decides. One text-only call: the closet catalogue (ids, type, colors,
+ * pattern, material, warmth, formality, seasons, freshness, AI desc) → N
+ * complete looks. No photos leave the phone; the vision work already lives in
+ * the per-item descriptions.
+ */
+export async function pickLooksCloud(
+  ctx: StyleContext,
+  items: Item[],
+  opts: PickLooksOptions = {},
+): Promise<OutfitCandidate[]> {
+  const cfg = cloud;
+  if (!cfg || !cloudReady(cfg)) return [];
+  const count = Math.max(1, Math.min(opts.count ?? 3, 5));
+  const available = items.filter((i) => i.available);
+  if (available.length < 3) return [];
+  const aliasOf = new Map<Item, string>();
+  available.forEach((it, idx) => aliasOf.set(it, `n${idx}`));
+  const byAlias = new Map<string, Item>();
+  for (const [item, a] of aliasOf) byAlias.set(a, item);
+  const occ = occasionOf(ctx.occasion).label;
+  const band = bandOf(ctx.temp);
+  const avoid = new Set(opts.avoid ?? []);
+  const choices = available.filter((i) => !avoid.has(i.id)).length >= 6 ? available.filter((i) => !avoid.has(i.id)) : available;
+
+  const raw = await cloudChat(cfg, {
+    system: PICK_SYSTEM,
+    user:
+      `Closet (one piece per line):\n${itemCatalog(choices, aliasOf)}\n\n` +
+      `Occasion: ${occ}. Weather: ${band.label} (outer layer ${band.outerRequired ? 'is REQUIRED' : 'is optional in this band'}). Mood: ${ctx.mood}.\n\n` +
+      `Propose ${count + 2} complete, DIFFERENT outfits from these ids.\n${LOOK_RULES(band.label)}\n\n${LOOK_SHAPE}`,
+    json: true,
+    reasoningEffort: 'low',
+    maxTokens: 1000,
+  });
+
+  return toCandidates(ctx, byAlias, parseRawLooks(raw)).slice(0, count);
 }

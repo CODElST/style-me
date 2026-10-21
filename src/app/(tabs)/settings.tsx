@@ -6,14 +6,14 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { useSQLiteContext } from 'expo-sqlite';
 
-import { Card, Divider, PrimaryButton, Row, SectionLabel } from '@/components/kit';
+import { Card, Chip, ChipRow, Divider, PrimaryButton, Row, SectionLabel } from '@/components/kit';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAppSettings } from '@/hooks/use-settings';
 import { enableOnDeviceModel, getAiModelStatus, type AiModelStatus } from '@/lib/ai';
-import { AI_PRESETS, cloudChat, cloudConfigOf } from '@/lib/cloud-ai';
+import { AI_PRESETS, cloudChat, cloudConfigOf, type CloudPresetId } from '@/lib/cloud-ai';
 // Local-only fallbacks (git-ignored) — removed once the key becomes user input.
-import { HARDCODED_CLOUD_KEY, HARDCODED_CLOUD_MODEL } from '@/lib/cloud-ai.local';
+import { HARDCODED_CLOUD_MODEL, HARDCODED_KEYS } from '@/lib/cloud-ai.local';
 import { getStats, listItems } from '@/lib/db';
 import { deletePhoto } from '@/lib/photos';
 
@@ -80,12 +80,23 @@ export default function SettingsScreen() {
     setModelDraft(storedModel);
   }
   const [cloudBusy, setCloudBusy] = useState(false);
+  // Endpoint draft — synced from storage with the render-phase adjust pattern.
+  const storedCloudEp = settings?.cloudAiEndpoint ?? '';
+  const [seenCloudEp, setSeenCloudEp] = useState(storedCloudEp);
+  const [cloudEpDraft, setCloudEpDraft] = useState(storedCloudEp);
+  if (seenCloudEp !== storedCloudEp) {
+    setSeenCloudEp(storedCloudEp);
+    setCloudEpDraft(storedCloudEp);
+  }
 
   const testCloud = async () => {
     const endpoint = settings?.cloudAiEndpoint || AI_PRESETS.gemini.endpoint;
     const model = settings?.cloudAiModel || HARDCODED_CLOUD_MODEL || AI_PRESETS.gemini.model;
-    // Same priority as CloudAiSync: user-entered → hardcoded local → none.
-    const key = (keyDraft || storedKey || HARDCODED_CLOUD_KEY).trim();
+    // Same priority as CloudAiSync; the key must belong to the active provider.
+    const presetId = (
+      (Object.entries(AI_PRESETS).find(([, p]) => p.endpoint === endpoint)?.[0] ?? 'gemini')
+    ) as CloudPresetId;
+    const key = (keyDraft || storedKey || HARDCODED_KEYS[presetId] || '').trim();
     if (!key) {
       Alert.alert('Cloud AI', 'Paste an API key first — get one free at aistudio.google.com/apikey');
       return;
@@ -214,11 +225,42 @@ export default function SettingsScreen() {
           <Card style={{ marginBottom: Spacing.four }}>
             <SectionLabel>Cloud AI (optional)</SectionLabel>
             <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18 }}>
-              Purely opt-in. When enabled, on-device AI failures fall back to a hosted model
-              (default: Google Gemini&apos;s free tier) that refines look wording and fills tag
-              gaps. The key is stored only in this phone&apos;s local database. Descriptions never
-              include photos unless you allow it below — with photos on, item/product images
-              ride along with each request.
+              Purely opt-in. When enabled, the AI takes real jobs: at add time it studies the
+              item (photo + listing text) once and writes a stylist description that later
+              guides look picking and tags; on Today, it decides what to wear together.
+              Falls back to the offline rules engine whenever anything fails. Keys stay in
+              this phone&apos;s local database; photos leave the phone only when you allow it
+              below — the one-time item analysis needs them for color judgment.
+            </Text>
+            <Row style={{ marginTop: Spacing.three, justifyContent: 'space-between' }}>
+              <Text style={{ color: t.text }}>Use cloud AI</Text>
+              <Switch
+                value={settings?.cloudAiEnabled ?? false}
+                onValueChange={(v) => void update({ cloudAiEnabled: v })}
+                trackColor={{ true: t.accent, false: t.backgroundSelected }}
+              />
+            </Row>
+            <Divider />
+            <Text style={{ color: t.text, marginBottom: 6 }}>Provider</Text>
+            <ChipRow>
+              {(['gemini', 'openrouter', 'groq'] as const).map((id) => (
+                <Chip
+                  key={id}
+                  size="sm"
+                  label={AI_PRESETS[id].label}
+                  selected={
+                    (cloudEpDraft || AI_PRESETS.gemini.endpoint) === AI_PRESETS[id].endpoint
+                  }
+                  onPress={() => {
+                    setCloudEpDraft(AI_PRESETS[id].endpoint);
+                    setModelDraft(id === 'gemini' ? HARDCODED_CLOUD_MODEL : AI_PRESETS[id].model);
+                  }}
+                />
+              ))}
+            </ChipRow>
+            <Text style={{ color: t.textSecondary, fontSize: 11.5, marginTop: 4 }}>
+              Chips prefill endpoint + model below. Keys must match the provider — leave empty
+              to use the built-in local keys for Gemini and Groq.
             </Text>
             <Row style={{ marginTop: Spacing.three, justifyContent: 'space-between' }}>
               <Text style={{ color: t.text }}>Use cloud AI</Text>
@@ -247,6 +289,16 @@ export default function SettingsScreen() {
                 onPress={() => void update({ cloudAiKey: keyDraft.trim() })}
               />
             </View>
+            <Text style={{ color: t.text, marginTop: Spacing.three, marginBottom: 6 }}>Endpoint</Text>
+            <TextInput
+              value={cloudEpDraft}
+              onChangeText={setCloudEpDraft}
+              placeholder={AI_PRESETS.gemini.endpoint}
+              placeholderTextColor={t.textSecondary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.input, { color: t.text, borderColor: t.hairline }]}
+            />
             <Text style={{ color: t.text, marginTop: Spacing.three, marginBottom: 6 }}>Model name</Text>
             <TextInput
               value={modelDraft}
@@ -259,9 +311,9 @@ export default function SettingsScreen() {
             />
             <View style={{ marginTop: Spacing.two }}>
               <PrimaryButton
-                label="Save model"
+                label="Save provider"
                 tone="plain"
-                onPress={() => void update({ cloudAiModel: modelDraft.trim() })}
+                onPress={() => void update({ cloudAiEndpoint: cloudEpDraft.trim(), cloudAiModel: modelDraft.trim() })}
               />
             </View>
             <Row style={{ marginTop: Spacing.three, justifyContent: 'space-between' }}>

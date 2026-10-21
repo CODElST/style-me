@@ -4,7 +4,7 @@
 
 import { useSQLiteContext } from 'expo-sqlite';
 import { router } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -18,6 +18,8 @@ import { useTheme } from '@/hooks/use-theme';
 import { useWardrobe } from '@/hooks/use-wardrobe';
 import { markItemsWorn, logWear, saveOutfit, setSetting } from '@/lib/db';
 import { generateLooks } from '@/lib/engine';
+import { getCloudAiConfig, pickLooksCloud } from '@/lib/ai';
+import { cloudReady } from '@/lib/cloud-ai';
 import { MOODS, OCCASIONS, TEMP_BANDS, occasionOf } from '@/lib/taxonomy';
 import type { MoodId, OccasionId, OutfitCandidate, StyleContext, TempBandId } from '@/lib/types';
 
@@ -29,6 +31,9 @@ export default function TodayScreen() {
   const [looks, setLooks] = useState<OutfitCandidate[] | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  /** AI styler pass (opt-in cloud): pending indicator + generation-run guard. */
+  const [aiBusy, setAiBusy] = useState(false);
+  const aiRun = useRef(0);
 
   const todayLabel = useMemo(
     () => new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }),
@@ -44,6 +49,26 @@ export default function TodayScreen() {
     const result = generateLooks(context, items, 8);
     setLooks(result.looks);
     setHint(result.hint);
+
+    // The AI stylist decides on top of the rules engine: rules looks appear
+    // instantly, AI looks are merged to the top when they arrive. Any failure
+    // leaves the rules list untouched. One request per press — not per card.
+    const cfg = getCloudAiConfig();
+    if (!cloudReady(cfg)) return;
+    const run = ++aiRun.current;
+    setAiBusy(true);
+    void pickLooksCloud(context, items, { count: 3 })
+      .then((picked) => {
+        if (picked.length === 0 || aiRun.current !== run) return;
+        setLooks((prev) => {
+          if (!prev) return prev;
+          const aiKeys = new Set(picked.map((l) => l.key));
+          return [...picked, ...prev.filter((l) => !aiKeys.has(l.key))].slice(0, 8);
+        });
+      })
+      .finally(() => {
+        if (aiRun.current === run) setAiBusy(false);
+      });
   }, [context, items, db]);
 
   const wearLook = useCallback(async (look: OutfitCandidate) => {
@@ -174,7 +199,16 @@ export default function TodayScreen() {
                         reasons={look.reasons}
                         tags={look.tags}
                         venues={look.venues}
-                        note={<LookNote ctx={context} candidate={look} items={look.items} noteKey={look.key} />}
+                        title={look.aiNote ? '✦ Styled by AI' : null}
+                        note={
+                          look.aiNote ? (
+                            <Text style={{ color: t.text, fontSize: 13, lineHeight: 19 }}>
+                              {look.aiNote}
+                            </Text>
+                          ) : (
+                            <LookNote ctx={context} candidate={look} items={look.items} noteKey={look.key} />
+                          )
+                        }
                         onPressItem={(item) => router.push(`/item/${item.id}`)}
                         footer={(
                           <View style={[styles.actionsRow, { gap: Spacing.two }]}>
@@ -184,6 +218,11 @@ export default function TodayScreen() {
                         )}
                       />
                     ))}
+                    {aiBusy ? (
+                      <Text style={{ color: t.textSecondary, fontSize: 12, textAlign: 'center' }}>
+                        ✦ thinking about your closet…
+                      </Text>
+                    ) : null}
                   </View>
                 )}
           {hint && looks && looks.length > 0 ? (

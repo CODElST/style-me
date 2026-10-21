@@ -161,6 +161,13 @@ export default function ItemScreen() {
             {`Worn ${item.wearCount}× · last ${relativeDate(item.lastWornAt)}\nAdded ${relativeDate(item.createdAt)}`}
           </Text>
 
+          {item.desc ? (
+            <View style={{ marginTop: Spacing.three }}>
+              <SectionLabel>Stylist&apos;s notes</SectionLabel>
+              <Text style={{ color: t.text, fontSize: 13.5, lineHeight: 20 }}>{item.desc}</Text>
+            </View>
+          ) : null}
+
           <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.three }}>
             <IconTextButton label="Wear today" icon="👕" onPress={() => void wearToday()} />
             {item.lookUrl ? (

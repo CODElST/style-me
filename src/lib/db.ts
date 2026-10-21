@@ -8,7 +8,7 @@ import type {
   Outfit, PatternId, SeasonId, TempBandId, WearEntry,
 } from './types';
 
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export async function migrateDatabaseIfNeeded(db: SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS items (
   wear_count INTEGER NOT NULL DEFAULT 0,
   last_worn_at INTEGER,
   note TEXT NOT NULL DEFAULT '',
+  ai_desc TEXT NOT NULL DEFAULT '',
   look_url TEXT,
   refs TEXT NOT NULL DEFAULT '[]',
   created_at INTEGER NOT NULL,
@@ -69,6 +70,12 @@ CREATE TABLE IF NOT EXISTS kvar (
   }
   // -- future migrations go here (if current === 1) --
 
+  if (current <= 1) {
+    // v2: AI stylist description (authored once per item at add time).
+    // "ai_desc" keeps SQL punctuation clear; it's a TEXT blob of prose.
+    await db.execAsync(`ALTER TABLE items ADD COLUMN ai_desc TEXT NOT NULL DEFAULT '';`);
+  }
+
   await db.execAsync(`PRAGMA user_version = ${DB_VERSION}`);
 }
 
@@ -79,7 +86,7 @@ interface ItemRow {
   colors: string; pattern: string; material: string | null;
   warmth: number; formality: number; seasons: string;
   available: number; favorite: number; wear_count: number;
-  last_worn_at: number | null; note: string; look_url: string | null;
+  last_worn_at: number | null; note: string; ai_desc: string | null; look_url: string | null;
   refs: string; created_at: number; updated_at: number;
 }
 
@@ -100,6 +107,7 @@ export function itemFromRow(r: ItemRow): Item {
     wearCount: r.wear_count,
     lastWornAt: r.last_worn_at,
     note: r.note,
+    desc: r.ai_desc ?? '',
     lookUrl: r.look_url,
     refs: safeJsonList<LookupRef>(r.refs),
     createdAt: r.created_at,
@@ -136,22 +144,22 @@ export async function saveItem(db: SQLiteDatabase, item: Item): Promise<void> {
     await db.runAsync(
       `INSERT INTO items
         (id, image, category, subtype, colors, pattern, material, warmth, formality,
-         seasons, available, favorite, wear_count, last_worn_at, note, look_url, refs,
+         seasons, available, favorite, wear_count, last_worn_at, note, ai_desc, look_url, refs,
          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          image=excluded.image, category=excluded.category, subtype=excluded.subtype,
          colors=excluded.colors, pattern=excluded.pattern, material=excluded.material,
          warmth=excluded.warmth, formality=excluded.formality, seasons=excluded.seasons,
          available=excluded.available, favorite=excluded.favorite, wear_count=excluded.wear_count,
-         last_worn_at=excluded.last_worn_at, note=excluded.note, look_url=excluded.look_url,
-         refs=excluded.refs, updated_at=excluded.updated_at`,
+         last_worn_at=excluded.last_worn_at, note=excluded.note, ai_desc=excluded.ai_desc,
+         look_url=excluded.look_url, refs=excluded.refs, updated_at=excluded.updated_at`,
       [
         item.id, item.image, item.category, item.subtype,
         JSON.stringify(item.colors), item.pattern, item.material, item.warmth,
         item.formality, JSON.stringify(item.seasons),
         item.available ? 1 : 0, item.favorite ? 1 : 0,
-        item.wearCount, item.lastWornAt, item.note, item.lookUrl,
+        item.wearCount, item.lastWornAt, item.note, item.desc, item.lookUrl,
         JSON.stringify(item.refs), item.createdAt, item.updatedAt,
       ],
     );
@@ -160,6 +168,15 @@ export async function saveItem(db: SQLiteDatabase, item: Item): Promise<void> {
 
 export async function deleteItem(db: SQLiteDatabase, id: string): Promise<void> {
   await db.runAsync('DELETE FROM items WHERE id = ?', [id]);
+}
+
+/** Store the AI-authored stylist description. Update-only: if the user never
+ *  saved the item, this affects no rows (no phantom inserts). */
+export async function setItemDesc(db: SQLiteDatabase, id: string, desc: string): Promise<void> {
+  await db.runAsync(
+    'UPDATE items SET ai_desc = ?, updated_at = ? WHERE id = ?',
+    [desc, Date.now(), id],
+  );
 }
 
 /** After an item was worn. */

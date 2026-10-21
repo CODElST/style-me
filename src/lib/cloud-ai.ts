@@ -30,7 +30,10 @@ export const AI_PRESETS = {
   groq: {
     label: 'Groq',
     endpoint: 'https://api.groq.com/openai/v1',
-    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    // Reasoning flagship (llama-4-scout is being deprecated on Groq). Text-only
+    // model: with photos on, the photo-confirmation pass silently skips here.
+    // openai/gpt-oss-20b is the cheaper/faster fallback if volume ever bites.
+    model: 'openai/gpt-oss-120b',
     keyUrl: 'https://console.groq.com/keys',
   },
 } as const;

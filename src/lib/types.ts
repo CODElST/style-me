@@ -48,7 +48,11 @@ export interface Item {
   favorite: boolean;
   wearCount: number;
   lastWornAt: number | null;
+  /** user's own words (persistent, optional) */
   note: string;
+  /** AI-written stylist description, authored once at add time (photo + listing
+   *  text are studied there); reused as text for tags and look picking. */
+  desc: string;
   /** Preferred web reference (product page), stored as URL only. */
   lookUrl: string | null;
   refs: LookupRef[];
@@ -96,6 +100,8 @@ export interface OutfitCandidate {
   /** other occasions this look would also work for */
   venues: OccasionId[];
   tags: string[];
+  /** present only on AI-proposed looks: the AI's own styling rationale */
+  aiNote?: string;
 }
 
 export interface LookSlots {
