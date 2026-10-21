@@ -18,7 +18,7 @@ export const AI_PRESETS = {
   gemini: {
     label: 'Google Gemini (free tier)',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    model: 'gemini-2.5-flash-lite',
+    model: 'gemini-3.8-flash',
     keyUrl: 'https://aistudio.google.com/apikey',
   },
   openrouter: {
@@ -64,6 +64,9 @@ interface ChatArgs {
   images?: string[];
   json?: boolean;
   maxTokens?: number;
+  /** Some models (Gemini 3.x) spend tokens on hidden thinking first; 'low'
+   *  keeps that cheap and leaves budget for the actual reply. */
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 const TIMEOUT_MS = 25_000;
@@ -137,6 +140,7 @@ export async function cloudChat(cfg: CloudAiConfig, args: ChatArgs): Promise<str
           { role: 'user', content },
         ],
         ...(args.json ? { response_format: { type: 'json_object' } } : {}),
+        ...(args.reasoningEffort ? { reasoning_effort: args.reasoningEffort } : {}),
         max_tokens: args.maxTokens ?? 256,
         temperature: 0.4,
       }),

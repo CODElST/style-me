@@ -94,7 +94,7 @@ export default function SettingsScreen() {
     try {
       const reply = await cloudChat(
         cloudConfigOf(true, endpoint, model, key, false),
-        { system: 'Answer with a single word.', user: 'Say ready.', maxTokens: 8 },
+        { system: 'Answer with a single word.', user: 'Say ready.', reasoningEffort: 'low', maxTokens: 300 },
       );
       Alert.alert(
         'Cloud AI',

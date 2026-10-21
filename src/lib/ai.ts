@@ -152,7 +152,8 @@ export async function describeLookEnhanced(
         `Outfit: ${pieces.join(' + ')}. Occasion: ${occasion}. Weather: ${band}. ` +
         `Style score: ${Math.round(candidate.score)}/100. Photos (if attached) show the pieces — work in a revealed detail.`,
       images: clouds,
-      maxTokens: 80,
+      reasoningEffort: 'low',
+      maxTokens: 600,
     });
     if (text) return text;
   }
@@ -283,7 +284,8 @@ export async function suggestTagsCloud(
     user: buildTagUserMessage(title, pageText),
     images: imageUri && cloud!.photos ? [imageUri] : [],
     json: true,
-    maxTokens: 140,
+    reasoningEffort: 'low',
+    maxTokens: 700,
   });
   if (!raw) return null;
   const json = sliceJson(raw);
