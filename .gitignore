@@ -45,3 +45,6 @@ example
 # generated native folders
 /ios
 /android
+
+# local-only cloud AI credentials
+src/lib/cloud-ai.local.ts

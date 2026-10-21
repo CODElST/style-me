@@ -7,6 +7,8 @@ import { useEffect } from 'react';
 
 import { useAppSettings } from '@/hooks/use-settings';
 import { setCloudAiConfig } from '@/lib/ai';
+// Local-only fallbacks (git-ignored); deleted once keys become user input.
+import { HARDCODED_CLOUD_KEY, HARDCODED_CLOUD_MODEL } from '@/lib/cloud-ai.local';
 import { AI_PRESETS, cloudConfigOf } from '@/lib/cloud-ai';
 
 export function CloudAiSync() {
@@ -14,13 +16,13 @@ export function CloudAiSync() {
 
   useEffect(() => {
     if (!settings) return;
-    // Empty endpoint/model means "provider presets" — default to Gemini.
+    // Priority: user-entered values → local hardcoded key → provider presets.
     setCloudAiConfig(
       cloudConfigOf(
         settings.cloudAiEnabled,
         settings.cloudAiEndpoint || AI_PRESETS.gemini.endpoint,
-        settings.cloudAiModel || AI_PRESETS.gemini.model,
-        settings.cloudAiKey,
+        settings.cloudAiModel || HARDCODED_CLOUD_MODEL || AI_PRESETS.gemini.model,
+        settings.cloudAiKey || HARDCODED_CLOUD_KEY,
         settings.cloudAiPhotos,
       ),
     );

@@ -12,6 +12,8 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAppSettings } from '@/hooks/use-settings';
 import { enableOnDeviceModel, getAiModelStatus, type AiModelStatus } from '@/lib/ai';
 import { AI_PRESETS, cloudChat, cloudConfigOf } from '@/lib/cloud-ai';
+// Local-only fallbacks (git-ignored) — removed once the key becomes user input.
+import { HARDCODED_CLOUD_KEY, HARDCODED_CLOUD_MODEL } from '@/lib/cloud-ai.local';
 import { getStats, listItems } from '@/lib/db';
 import { deletePhoto } from '@/lib/photos';
 
@@ -81,8 +83,9 @@ export default function SettingsScreen() {
 
   const testCloud = async () => {
     const endpoint = settings?.cloudAiEndpoint || AI_PRESETS.gemini.endpoint;
-    const model = settings?.cloudAiModel || AI_PRESETS.gemini.model;
-    const key = (keyDraft || storedKey).trim();
+    const model = settings?.cloudAiModel || HARDCODED_CLOUD_MODEL || AI_PRESETS.gemini.model;
+    // Same priority as CloudAiSync: user-entered → hardcoded local → none.
+    const key = (keyDraft || storedKey || HARDCODED_CLOUD_KEY).trim();
     if (!key) {
       Alert.alert('Cloud AI', 'Paste an API key first — get one free at aistudio.google.com/apikey');
       return;
