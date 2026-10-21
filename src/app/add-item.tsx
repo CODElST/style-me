@@ -15,7 +15,8 @@ import { Spacing, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAppSettings } from '@/hooks/use-settings';
 import { saveItem, setItemDesc } from '@/lib/db';
-import { analyzeItemCloud, suggestTags, suggestTagsNative, suggestTagsCloud, type SuggestedProductTags } from '@/lib/ai';
+import { analyzeItemCloud, getCloudAiConfig, suggestTags, suggestTagsNative, suggestTagsCloud, type SuggestedProductTags } from '@/lib/ai';
+import { cloudReady } from '@/lib/cloud-ai';
 import { pickPhoto, finalizePhoto } from '@/lib/photos';
 import { webLookup } from '@/lib/lookup';
 import { analyzeImageFile, downloadAndPrepare, fetchProduct } from '@/lib/extract';
@@ -176,19 +177,29 @@ export default function AddItemScreen() {
         }
       }
 
-      // The AI stylist description — authored ONCE here (photo + listing are
-      // studied in the same pass when photo consent is on), stored on the item
-      // and later reused as plain text by the outfit styler. Its tags also
-      // fill any gaps the earlier passes left.
+      // The AI stylist description — authored ONCE here. Tell the user when
+      // cloud was expected to answer but didn't (toggle on, no reply).
       const intel = await analyzeItemCloud(page.title ?? '', page.text, stored);
-      if (!intel || idRef.current !== mine) return;
-      setAiDesc(intel.desc);
-      if (Object.keys(intel.tags).length > 0) {
-        setDraft((d) => mergeAiTags(d, auto, intel.tags));
-        setAutofillNote('AI wrote a stylist description and refined the tags. Review before saving.');
+      if (idRef.current !== mine) return;
+      if (intel) {
+        setAiDesc(intel.desc);
+        if (Object.keys(intel.tags).length > 0) {
+          setDraft((d) => mergeAiTags(d, auto, intel.tags));
+          setAutofillNote('AI wrote a stylist description and refined the tags. Review before saving.');
+        } else if (intel.desc) {
+          setAutofillNote('AI wrote a stylist description. Review the tags before saving.');
+        }
+        if (savedRef.current) void setItemDesc(db, mine, intel.desc);
+      } else {
+        const cfgNow = getCloudAiConfig();
+        if (cloudReady(cfgNow)) {
+          setAutofillNote('Cloud AI was reached but had nothing to add — the engine tags above still apply.');
+        } else {
+          setAutofillNote(
+            'Cloud AI is off — turn it on in Settings (Use cloud AI) for AI-written descriptions and picks.',
+          );
+        }
       }
-      // If the item is already saved (user was fast), the desc lands afterward.
-      if (savedRef.current) void setItemDesc(db, mine, intel.desc);
     } catch (e) {
       Alert.alert('Link', `Could not use that image: ${(e as Error).message}`);
     } finally {

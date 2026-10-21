@@ -261,6 +261,17 @@ function buildTagUserMessage(title: string, pageText: string): string {
  * failure (model missing, weird reply) returns null — caller keeps rule-based
  * tags. Runs only when the module is compiled in and the model is downloaded.
  */
+/** Onion-skin guard: Nano on Samsung builds can hang; never block the cloud
+ *  call behind it for longer than this. */
+const NATIVE_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    p,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
 export async function suggestTagsNative(
   title: string,
   pageText: string,
@@ -269,15 +280,19 @@ export async function suggestTagsNative(
   const bridge = native;
   if (!bridge?.tagProductAsync) return null;
   try {
-    const raw = await bridge.tagProductAsync(
-      title.slice(0, 160),
-      pageText.slice(0, 900),
-      imageUri ? [imageUri] : [],
-      TYPE_IDS.join(','),
-      MATERIAL_IDS.join(','),
-      PATTERN_IDS.join(','),
-      COLOR_IDS.join(','),
+    const raw = await withTimeout(
+      bridge.tagProductAsync(
+        title.slice(0, 160),
+        pageText.slice(0, 900),
+        imageUri ? [imageUri] : [],
+        TYPE_IDS.join(','),
+        MATERIAL_IDS.join(','),
+        PATTERN_IDS.join(','),
+        COLOR_IDS.join(','),
+      ),
+      NATIVE_TIMEOUT_MS,
     );
+    if (!raw) return null;
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
     if (start < 0 || end <= start) return null;

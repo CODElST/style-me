@@ -148,7 +148,18 @@ export async function cloudChat(cfg: CloudAiConfig, args: ChatArgs): Promise<str
         temperature: 0.4,
       }),
     }).finally(() => clearTimeout(timer));
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Dev diagnostics — Surface when a member path silently returns null.
+      if (__DEV__) {
+        try {
+          const errBody = await res.text();
+          console.warn(`[cloud-ai] ${res.status} from ${cfg.model}: ${errBody.slice(0, 240)}`);
+        } catch {
+          console.warn(`[cloud-ai] ${res.status} from ${cfg.model}`);
+        }
+      }
+      return null;
+    }
     const body = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
     };
