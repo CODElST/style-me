@@ -8,8 +8,10 @@ import { useCallback, useState } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import { useSQLiteContext } from 'expo-sqlite';
 
-import { Card, IconTextButton, PrimaryButton, Row, SectionLabel, TagPill, Divider } from '@/components/kit';
+import { Chip, Card, IconTextButton, PrimaryButton, Row, SectionLabel, TagPill, Divider } from '@/components/kit';
 import { TagForm, SEASON_LABELS, type TagDraft } from '@/components/tag-form';
+import { pinterestQueriesCloud } from '@/lib/ai';
+import { openPinterest, queriesForItem } from '@/lib/pinterest';
 import { Spacing, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { deleteItem, getItem, markItemsWorn, logWear, saveItem } from '@/lib/db';
@@ -35,6 +37,9 @@ export default function ItemScreen() {
     setLastSeenDesc(seenDesc);
     setDescDraft(seenDesc);
   }
+  /** AI-refined Pinterest searches (null → the tag-built ones render). */
+  const [pinQueries, setPinQueries] = useState<string[] | null>(null);
+  const [pinBusy, setPinBusy] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -119,6 +124,17 @@ export default function ItemScreen() {
     const next: Item = { ...item, lookUrl: url, updatedAt: now() };
     await saveItem(db, next);
     setDateItem(next);
+  };
+
+  const askPinQueries = async () => {
+    setPinBusy(true);
+    try {
+      const res = await pinterestQueriesCloud([item], null);
+      if (res) setPinQueries(res);
+      else Alert.alert('Pinterest', 'AI had nothing sharper right now — the tag-built queries still open.');
+    } finally {
+      setPinBusy(false);
+    }
   };
 
   return (
@@ -212,6 +228,33 @@ export default function ItemScreen() {
               />
             ) : null}
           </View>
+
+          <Card style={{ marginTop: Spacing.three }}>
+            <SectionLabel>Outfit ideas on Pinterest</SectionLabel>
+            <Text style={{ color: t.textSecondary, fontSize: 12.5, lineHeight: 18 }}>
+              Searches written from this piece&apos;s tags. Tap one to open it on Pinterest — the
+              app if installed, an in-app browser otherwise.
+            </Text>
+            <View style={styles.pinChips}>
+              {(pinQueries ?? queriesForItem(item)).map((q) => (
+                <Chip
+                  key={q}
+                  size="sm"
+                  label={q}
+                  selected={false}
+                  icon="🅿️"
+                  onPress={() => void openPinterest(q)}
+                />
+              ))}
+            </View>
+            <Row style={{ marginTop: Spacing.two }}>
+              <IconTextButton
+                label={pinBusy ? '✦ styling…' : pinQueries ? '✦ AI queries' : '✦ Ask AI for sharper queries'}
+                icon={pinBusy ? undefined : '🎨'}
+                onPress={() => void askPinQueries()}
+              />
+            </Row>
+          </Card>
 
           <Divider />
 
@@ -312,5 +355,11 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 3 / 4,
     marginTop: Spacing.three,
+  },
+  pinChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
   },
 });

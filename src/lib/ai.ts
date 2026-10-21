@@ -38,6 +38,7 @@ import type {
   Item,
   LookSlots,
   MaterialId,
+  OccasionId,
   OutfitCandidate,
   PatternId,
   StyleContext,
@@ -627,4 +628,65 @@ export async function pickLooksCloud(
   });
 
   return toCandidates(ctx, byAlias, parseRawLooks(raw)).slice(0, count);
+}
+
+// --------------------------------------------------------- Pinterest queries
+//
+// The deterministic tag-built searches are good; the AI version is better �
+// it writes the queries the way a stylist phrases them ("monochrome winter
+// layers men", "silver jewellery streetwear styling"). One small text-only
+// call, optional on every surface (fallback: the tag-built list).
+
+/**
+ * Three Pinterest-style outfit searches for a piece and, when list is
+ * present, the look it belongs to. Returns null on any failure or timeout �
+ * callers keep the deterministic queries instead.
+ */
+export async function pinterestQueriesCloud(
+  pieces: Item[],
+  occasion: OccasionId | null,
+): Promise<string[] | null> {
+  const cfg = cloud;
+  if (!cfg || !cloudReady(cfg)) return null;
+  const raw = await withTimeout(
+    chatWithFallback({
+      system:
+        'You write Pinterest search queries a stylist would use to find outfit inspiration. Reply with JSON only.',
+      user:
+        `Pieces: ${pieces.map((i) => i.id).join(', ')}.\nLook details:\n` +
+        pieces
+          .map((i) => {
+            const label = typeOf(i.subtype).label;
+            const color = i.colors[0] ? `${i.colors[0]} ` : '';
+            return `- ${color}${label}` +
+              (i.category !== 'extra'
+                ? `, colors=[${i.colors.join(',')}], pattern=${i.pattern}, formality=${FORMALITY_LABELS[i.formality]}, seasons=[${i.seasons.join(',')}]`
+                : '') +
+              (i.desc ? `\n  notes: ${i.desc.slice(0, 180)}` : '');
+          })
+          .join('\n') +
+        '\nOccasion: ' + (occasion ?? 'everyday') + '.\n\n' +
+        'Write "queries": 3 Web/Pinterest search phrases a real fashion person would type. ' +
+        'Make them specific to these exact pieces (color AND garment), varied in angle � e.g. one pairing phrase, ' +
+        'one vibe/occasion phrase, one "how to style <piece>" phrase. English, lowercase, each at most 8 words. ' +
+        'Reply: {"queries":["...","...","..."]}',
+      images: [],
+      json: true,
+      reasoningEffort: 'low',
+      maxTokens: 300,
+    }),
+    9_000,
+  );
+  if (!raw) return null;
+  const json = sliceJson(raw);
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as { queries?: unknown };
+    const queries = (Array.isArray(parsed.queries) ? parsed.queries : [])
+      .filter((q): q is string => typeof q === 'string' && q.trim().length > 2)
+      .slice(0, 3);
+    return queries.length > 0 ? queries : null;
+  } catch {
+    return null;
+  }
 }

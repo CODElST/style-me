@@ -1,11 +1,12 @@
 import { Image } from 'expo-image';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { GradePill, Row, ScoreRing, TagPill } from './kit';
+import { Chip, GradePill, Row, ScoreRing, TagPill } from './kit';
 import { Spacing, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { itemTitle } from '@/lib/display';
+import { openPinterest, queriesForLook } from '@/lib/pinterest';
 import { occasionOf } from '@/lib/taxonomy';
 import type { Item, OccasionId } from '@/lib/types';
 
@@ -28,6 +29,7 @@ export interface OutfitCardProps {
 export function OutfitCard(props: OutfitCardProps) {
   const t = useTheme();
   const { items, score, grade, reasons = [], tags = [], venues = [], title, meta, note, onPressItem, footer } = props;
+  const [pinOpen, setPinOpen] = useState(false);
 
   const fashion = items.filter((i) => i.category !== 'extra');
   const extras = items.filter((i) => i.category === 'extra');
@@ -102,6 +104,27 @@ export function OutfitCard(props: OutfitCardProps) {
         </View>
       ) : null}
 
+      <Text
+        onPress={() => setPinOpen((open) => !open)}
+        style={{ color: t.textSecondary, fontSize: 12.5, marginTop: Spacing.two }}
+      >
+        {pinOpen ? 'Hide outfit ideas ⌃' : '♟ Outfit ideas on Pinterest  ⌄'}
+      </Text>
+      {pinOpen ? (
+        <View style={styles.pinChips}>
+          {queriesForLook(items, venues[0] ?? null).map((q) => (
+            <Chip
+              key={q}
+              size="sm"
+              label={q}
+              selected={false}
+              icon="🅿️"
+              onPress={() => void openPinterest(q)}
+            />
+          ))}
+        </View>
+      ) : null}
+
       {note}
 
       {meta ? (
@@ -150,5 +173,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two,
+  },
+  pinChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
   },
 });
