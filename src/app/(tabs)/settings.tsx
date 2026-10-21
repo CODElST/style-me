@@ -11,7 +11,7 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAppSettings } from '@/hooks/use-settings';
 import { enableOnDeviceModel, getAiModelStatus, type AiModelStatus } from '@/lib/ai';
-import { AI_PRESETS, cloudChat, cloudConfigOf, type CloudPresetId } from '@/lib/cloud-ai';
+import { AI_PRESETS, cloudChat, cloudConfigOf, presetSupportsVision, type CloudPresetId } from '@/lib/cloud-ai';
 // Local-only fallbacks (git-ignored) — removed once the key becomes user input.
 import { HARDCODED_CLOUD_MODEL, HARDCODED_KEYS } from '@/lib/cloud-ai.local';
 import { getStats, listItems } from '@/lib/db';
@@ -97,6 +97,7 @@ export default function SettingsScreen() {
       (Object.entries(AI_PRESETS).find(([, p]) => p.endpoint === endpoint)?.[0] ?? 'gemini')
     ) as CloudPresetId;
     const key = (keyDraft || storedKey || HARDCODED_KEYS[presetId] || '').trim();
+    const vision = presetSupportsVision(endpoint, model);
     if (!key) {
       Alert.alert('Cloud AI', 'Paste an API key first — get one free at aistudio.google.com/apikey');
       return;
@@ -104,7 +105,7 @@ export default function SettingsScreen() {
     setCloudBusy(true);
     try {
       const reply = await cloudChat(
-        cloudConfigOf(true, endpoint, model, key, false),
+        cloudConfigOf(true, endpoint, model, key, false, vision),
         { system: 'Answer with a single word.', user: 'Say ready.', reasoningEffort: 'low', maxTokens: 300 },
       );
       Alert.alert(

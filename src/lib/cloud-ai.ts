@@ -47,11 +47,23 @@ export interface CloudAiConfig {
   key: string;
   /** item/product photos ride along with the request (they leave the phone) */
   photos: boolean;
+  /** the configured model accepts image parts (groq's gpt-oss line is text-only) */
+  vision: boolean;
 }
 
 /** Readable settings shape used by callers (built from the DB). */
-export function cloudConfigOf(enabled: boolean, endpoint: string, model: string, key: string, photos: boolean): CloudAiConfig {
-  return { enabled, endpoint, model, key, photos };
+export function cloudConfigOf(enabled: boolean, endpoint: string, model: string, key: string, photos: boolean, vision: boolean): CloudAiConfig {
+  return { enabled, endpoint, model, key, photos, vision };
+}
+
+/** Does the configured (provider, model) accept image parts?
+ *  Groq's production text lineup is text-only after the Llama-4 deprecation;
+ *  their preview qwen3.8-27b (or a legacy llama-4) still takes images. */
+export function presetSupportsVision(endpoint: string, model: string): boolean {
+  if (/generativelanguage\.googleapis\.com/.test(endpoint)) return /gemini/i.test(model);
+  if (/api\.groq\.com/.test(endpoint)) return /qwen3\.8|qwen[^/\s]*-(vl|omni)|llama-4|scout|maverick/i.test(model);
+  // openrouter + anything else: common vision-capable families
+  return /vl|vision|omni|multimodal|claude-3|gemini|llama-4|qwen-vl|pixtral|gpt-4o/i.test(model);
 }
 
 export function cloudReady(c: CloudAiConfig | null | undefined): boolean {
@@ -75,7 +87,6 @@ interface ChatArgs {
 const TIMEOUT_MS = 25_000;
 /** Long-edge cap for photos sent to the cloud — keeps payloads small. */
 const IMAGE_MAX_EDGE = 640;
-
 const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 /** Pure-JS base64 for a small byte array (a ~640px JPEG is well within it). */
@@ -122,7 +133,7 @@ export async function cloudChat(cfg: CloudAiConfig, args: ChatArgs): Promise<str
     // OpenAI-compatible API rejects string-only messages sent as part arrays
     // ("messages[1].content must be a string"), while Gemini accepts both.
     let content: string | Record<string, unknown>[] = args.user;
-    if (cfg.photos && args.images?.length) {
+    if (cfg.photos && cfg.vision && args.images?.length) {
       const parts: Record<string, unknown>[] = [];
       for (const src of args.images.slice(0, 3)) {
         const dataUrl = await toDataUrl(src);
@@ -135,7 +146,7 @@ export async function cloudChat(cfg: CloudAiConfig, args: ChatArgs): Promise<str
     }
 
     const url = `${cfg.endpoint.replace(/\/+$/, '')}/chat/completions`;
-    const request = () => {
+    const request = (payloadContent: string | Record<string, unknown>[]) => {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
       return fetch(url, {
@@ -149,7 +160,7 @@ export async function cloudChat(cfg: CloudAiConfig, args: ChatArgs): Promise<str
           model: cfg.model,
           messages: [
             { role: 'system', content: args.system },
-            { role: 'user', content },
+            { role: 'user', content: payloadContent },
           ],
           ...(args.json ? { response_format: { type: 'json_object' } } : {}),
           ...(args.reasoningEffort ? { reasoning_effort: args.reasoningEffort } : {}),
@@ -161,10 +172,18 @@ export async function cloudChat(cfg: CloudAiConfig, args: ChatArgs): Promise<str
 
     // One automatic retry for transient capacity errors (Gemini free tier
     // throws 503 "high demand" spikes; Groq throttles with 429).
-    let res: Response = await request();
+    let res: Response = await request(content);
     if (res.status === 503 || res.status === 429) {
       await new Promise((r) => setTimeout(r, 1_500));
-      res = await request();
+      res = await request(content);
+    }
+
+    // Self-heal: a provider that rejects image parts still gets one try as
+    // text-only — the answer lands, minus the visual read.
+    if (res.status === 400 && Array.isArray(content)) {
+      const textPart = content.find((p) => p.type === 'text') as { text?: string } | undefined;
+      res = await request(textPart?.text ?? args.user);
+      if (__DEV__) console.warn('[cloud-ai] images rejected — retried text-only');
     }
 
     if (!res.ok) {

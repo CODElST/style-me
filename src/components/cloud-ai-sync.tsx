@@ -9,7 +9,7 @@ import { useAppSettings } from '@/hooks/use-settings';
 import { setCloudAiConfig } from '@/lib/ai';
 // Local-only fallbacks (git-ignored); deleted once keys become user input.
 import { HARDCODED_CLOUD_MODEL, HARDCODED_KEYS } from '@/lib/cloud-ai.local';
-import { AI_PRESETS, cloudConfigOf, type CloudPresetId } from '@/lib/cloud-ai';
+import { AI_PRESETS, cloudConfigOf, presetSupportsVision, type CloudPresetId } from '@/lib/cloud-ai';
 
 export function CloudAiSync() {
   const { settings } = useAppSettings();
@@ -22,13 +22,15 @@ export function CloudAiSync() {
     const presetId = (
       (Object.entries(AI_PRESETS).find(([, p]) => p.endpoint === endpoint)?.[0] ?? 'gemini')
     ) as CloudPresetId;
+    const model = settings.cloudAiModel || HARDCODED_CLOUD_MODEL || AI_PRESETS.gemini.model;
     setCloudAiConfig(
       cloudConfigOf(
         settings.cloudAiEnabled,
         endpoint,
-        settings.cloudAiModel || HARDCODED_CLOUD_MODEL || AI_PRESETS.gemini.model,
+        model,
         settings.cloudAiKey || HARDCODED_KEYS[presetId] || '',
         settings.cloudAiPhotos,
+        presetSupportsVision(endpoint, model),
       ),
     );
   }, [settings]);

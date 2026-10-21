@@ -20,7 +20,8 @@
 import type { ModelStatus } from '../../modules/styleme-ai';
 import type { NativeBridge } from './ai-bridge';
 import { evaluateLook } from './engine';
-import { cloudChat, cloudReady, sliceJson, type CloudAiConfig } from './cloud-ai';
+import { AI_PRESETS, cloudChat, cloudReady, presetSupportsVision, sliceJson, type CloudAiConfig, type CloudPresetId } from './cloud-ai';
+import { HARDCODED_KEYS } from './cloud-ai.local';
 import {
   FORMALITY_LABELS,
   MATERIALS,
@@ -64,6 +65,59 @@ export function setCloudAiConfig(cfg: CloudAiConfig | null): void {
 
 export function getCloudAiConfig(): CloudAiConfig | null {
   return cloud;
+}
+
+// ---- provider fallback chain ------------------------------------------------
+// Each provider preset gets a turn only if a local key exists for it (the
+// git-ignored cloud-ai.local.ts holds Gemini AND Groq). A failed primary is
+// retried text-forward on the next provider so AI features survive a single
+// vendor's bad day (Gemini 503 spikes, Groq 429s).
+
+const GROQ_VISION_MODEL = 'qwen/qwen3.8-27b'; // the one vision model Groq runs (preview)
+
+export function fallbackConfigOf(primary: CloudAiConfig): CloudAiConfig | null {
+  const primaryId = (Object.entries(AI_PRESETS).find(
+    ([, p]) => p.endpoint === primary.endpoint,
+  )?.[0] ?? null) as CloudPresetId | null;
+  const order: CloudPresetId[] = primaryId === 'gemini' ? ['groq'] : ['gemini', 'groq'];
+  for (const id of order) {
+    const key = HARDCODED_KEYS[id];
+    if (!key) continue;
+    const preset = AI_PRESETS[id];
+    return {
+      enabled: true,
+      endpoint: preset.endpoint,
+      model: preset.model,
+      key,
+      photos: primary.photos,
+      vision: presetSupportsVision(preset.endpoint, preset.model),
+    };
+  }
+  return null;
+}
+
+/**
+ * Fire on the configured provider; on failure, retry on the fallback. When
+ * the call NEEDS images and the fallback is Groq's text-only default (gpt-
+ * oss), the request re-routes to Groq's single vision model so the visual
+ * judgment is never silently skipped.
+ */
+async function chatWithFallback(args: Parameters<typeof cloudChat>[1]): Promise<string | null> {
+  const primary = cloud;
+  if (!primary || !cloudReady(primary)) return null;
+  const first = await cloudChat(primary, args).catch(() => null);
+  if (first) return first;
+
+  const fallback = fallbackConfigOf(primary);
+  if (!fallback || !cloudReady(fallback)) return null;
+  const needsImages = (args.images?.length ?? 0) > 0 && primary.vision;
+  const isGroq = /api\.groq\.com/.test(fallback.endpoint);
+  const retryOn = needsImages && isGroq && !fallback.vision
+    ? { ...fallback, model: GROQ_VISION_MODEL, vision: true }
+    : fallback;
+  const retryArgs = needsImages && !isGroq && !fallback.vision ? { ...args, images: [] } : args;
+  if (__DEV__) console.warn(`[cloud-ai] primary failed — falling back to ${retryOn.model}`);
+  return cloudChat(retryOn, retryArgs).catch(() => null);
 }
 
 export interface AiStatus {
@@ -164,7 +218,7 @@ export async function describeLookEnhanced(
   // 1) Cloud model — user opted in via Settings; images only when consented.
   if (cloudReady(cloud)) {
     const clouds = cloud!.photos ? lookImages(items) : [];
-    const text = await cloudChat(cloud!, {
+    const text = await chatWithFallback({
       system:
         'You are a personal stylist. Write ONE friendly sentence (max 25 words) describing why the given outfit suits the occasion and weather. Reply with the sentence only — no quotes, no explanation.',
       user:
@@ -313,7 +367,7 @@ export async function suggestTagsCloud(
   imageUri?: string | null,
 ): Promise<SuggestedProductTags | null> {
   if (!cloudReady(cloud)) return null;
-  const raw = await cloudChat(cloud!, {
+  const raw = await chatWithFallback({
     system: 'You classify clothing products into a fixed tag taxonomy. Reply with JSON only.',
     user: buildTagUserMessage(title, pageText),
     images: imageUri && cloud!.photos ? [imageUri] : [],
@@ -360,7 +414,7 @@ export async function analyzeItemCloud(
 ): Promise<ItemIntel | null> {
   const cfg = cloud;
   if (!cfg || !cloudReady(cfg)) return null;
-  const raw = await cloudChat(cfg, {
+  const raw = await chatWithFallback({
     system:
       'You are a fashion archivist and personal stylist. Study the garment photo (if attached) and the listing text carefully. Reply with JSON only.',
     user:
@@ -377,7 +431,7 @@ export async function analyzeItemCloud(
     json: true,
     reasoningEffort: 'low',
     maxTokens: 700,
-  });
+  } as Parameters<typeof cloudChat>[1]);
   if (!raw) return null;
   const json = sliceJson(raw);
   if (!json) return null;
@@ -555,7 +609,7 @@ export async function pickLooksCloud(
   const avoid = new Set(opts.avoid ?? []);
   const choices = available.filter((i) => !avoid.has(i.id)).length >= 6 ? available.filter((i) => !avoid.has(i.id)) : available;
 
-  const raw = await cloudChat(cfg, {
+  const raw = await chatWithFallback({
     system: PICK_SYSTEM,
     user:
       `Closet (one piece per line):\n${itemCatalog(choices, aliasOf)}\n\n` +
