@@ -19,6 +19,7 @@
 
 import type { ModelStatus } from '../../modules/styleme-ai';
 import type { NativeBridge } from './ai-bridge';
+import { cloudChat, cloudReady, sliceJson, type CloudAiConfig } from './cloud-ai';
 import { MATERIALS, PALETTE, PATTERNS, TYPES, bandOf, occasionOf, suggestSeasons, typeOf } from './taxonomy';
 import type { ColorId, Item, MaterialId, OutfitCandidate, PatternId, StyleContext } from './types';
 
@@ -31,6 +32,19 @@ try {
   native = mod?.default ?? null;
 } catch {
   native = null;
+}
+
+// Optional cloud layer — mirrored in from the DB by <CloudAiSync /> (root
+// layout) and after every Settings save. Held here as the single source the
+// async helpers consult.
+let cloud: CloudAiConfig | null = null;
+
+export function setCloudAiConfig(cfg: CloudAiConfig | null): void {
+  cloud = cfg;
+}
+
+export function getCloudAiConfig(): CloudAiConfig | null {
+  return cloud;
 }
 
 export interface AiStatus {
@@ -112,9 +126,9 @@ function lookImages(items: Item[]): string[] {
 }
 
 /**
- * Rules phrasing, upgraded in one sentence by the on-device model. Sends the
- * pieces' photos when available (Gemini Nano is multimodal); if the multimodal
- * attempt fails, falls back to a text-only call, then the rules text.
+ * Rules phrasing, upgraded in one sentence. Priority: cloud model (when the
+ * user enabled it) → on-device Nano (photos!) → deterministic rules text.
+ * The pieces' photos ride along only where consented/available.
  */
 export async function describeLookEnhanced(
   ctx: StyleContext,
@@ -122,35 +136,45 @@ export async function describeLookEnhanced(
   items: Item[],
 ): Promise<string> {
   const rulesText = describeLookText(ctx, candidate, items);
-  const bridge = native;
-  if (!bridge?.describeLookAsync) return rulesText;
-  try {
-    const pieces = items
-      .filter((i) => i.category !== 'extra')
-      .map((i) => typeOf(i.subtype).label.toLowerCase());
-    const images = lookImages(items);
-    try {
-      return await bridge.describeLookAsync(
-        pieces,
-        occasionOf(ctx.occasion).label,
-        bandOf(ctx.temp).label,
-        candidate.score,
-        images,
-      );
-    } catch (multimodalError) {
-      // Model may be text-only on this device — retry without pictures once.
-      if (images.length === 0) throw multimodalError;
-      return await bridge.describeLookAsync(
-        pieces,
-        occasionOf(ctx.occasion).label,
-        bandOf(ctx.temp).label,
-        candidate.score,
-        [],
-      );
-    }
-  } catch {
-    return rulesText;
+  const pieces = items
+    .filter((i) => i.category !== 'extra')
+    .map((i) => typeOf(i.subtype).label.toLowerCase());
+  const occasion = occasionOf(ctx.occasion).label;
+  const band = bandOf(ctx.temp).label;
+
+  // 1) Cloud model — user opted in via Settings; images only when consented.
+  if (cloudReady(cloud)) {
+    const clouds = cloud!.photos ? lookImages(items) : [];
+    const text = await cloudChat(cloud!, {
+      system:
+        'You are a personal stylist. Write ONE friendly sentence (max 25 words) describing why the given outfit suits the occasion and weather. Reply with the sentence only — no quotes, no explanation.',
+      user:
+        `Outfit: ${pieces.join(' + ')}. Occasion: ${occasion}. Weather: ${band}. ` +
+        `Style score: ${Math.round(candidate.score)}/100. Photos (if attached) show the pieces — work in a revealed detail.`,
+      images: clouds,
+      maxTokens: 80,
+    });
+    if (text) return text;
   }
+
+  // 2) On-device Nano — multimodal, nothing leaves the phone.
+  const bridge = native;
+  if (bridge?.describeLookAsync) {
+    try {
+      const images = lookImages(items);
+      try {
+        return await bridge.describeLookAsync(pieces, occasion, band, candidate.score, images);
+      } catch (multimodalError) {
+        // Model may be text-only on this device — retry without pictures once.
+        if (images.length === 0) throw multimodalError;
+        return await bridge.describeLookAsync(pieces, occasion, band, candidate.score, []);
+      }
+    } catch {
+      // fall through to rules text
+    }
+  }
+
+  return rulesText;
 }
 
 // ------------------------------------------------------------------ tag prefill
@@ -171,6 +195,44 @@ function inList<T>(list: readonly T[], value: unknown): T | null {
   return typeof value === 'string' && (list as readonly unknown[]).includes(value)
     ? (value as T)
     : null;
+}
+
+/** Validate a parsed {subtype, material, pattern, colors} object against the taxonomy. */
+function validateTagJson(parsed: Record<string, unknown>): SuggestedProductTags {
+  const result: SuggestedProductTags = {};
+  const subtype = inList(TYPE_IDS, parsed.subtype);
+  if (subtype) result.subtype = subtype;
+  if ('material' in parsed) {
+    const material = inList(MATERIAL_IDS, parsed.material);
+    result.material = material; // null is meaningful ("no material found")
+  }
+  const pattern = inList(PATTERN_IDS, parsed.pattern);
+  if (pattern) result.pattern = pattern;
+  if (Array.isArray(parsed.colors)) {
+    const colors = parsed.colors.map((c) => inList(COLOR_IDS, c)).filter((c) => c !== null);
+    if (colors.length > 0) result.colors = colors as ColorId[];
+  }
+  return result;
+}
+
+const TAG_PROMPT =
+  'Read this product info and, if provided, its photo. ' +
+  'Choose EXACTLY one subtype from the type list, at most one material from the ' +
+  'material list, exactly one pattern from the pattern list, and 1-3 colors from ' +
+  'the color list. Use only ids from the lists. Look at the photo when judging ' +
+  'color and pattern. Reply with JSON only: ' +
+  '{"subtype":"...","material":"...","pattern":"...","colors":["..."]}' +
+  ' — where the lists are: types=[%@TYPES%], materials=[%@MATERIALS%], ' +
+  'patterns=[%@PATTERNS%], colors=[%@COLORS%], title=%@TITLE%, listing=%@TEXT%.';
+
+function buildTagUserMessage(title: string, pageText: string): string {
+  return TAG_PROMPT
+    .replace('%@TYPES%', TYPE_IDS.join(','))
+    .replace('%@MATERIALS%', MATERIAL_IDS.join(','))
+    .replace('%@PATTERNS%', PATTERN_IDS.join(','))
+    .replace('%@COLORS%', COLOR_IDS.join(','))
+    .replace('%@TITLE%', title.slice(0, 160))
+    .replace('%@TEXT%', pageText.slice(0, 900));
 }
 
 /**
@@ -199,21 +261,35 @@ export async function suggestTagsNative(
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
     if (start < 0 || end <= start) return null;
-    const parsed = JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
-    const result: SuggestedProductTags = {};
-    const subtype = inList(TYPE_IDS, parsed.subtype);
-    if (subtype) result.subtype = subtype;
-    if ('material' in parsed) {
-      const material = inList(MATERIAL_IDS, parsed.material);
-      result.material = material; // null is meaningful ("no material found")
-    }
-    const pattern = inList(PATTERN_IDS, parsed.pattern);
-    if (pattern) result.pattern = pattern;
-    if (Array.isArray(parsed.colors)) {
-      const colors = parsed.colors.map((c) => inList(COLOR_IDS, c)).filter((c) => c !== null);
-      if (colors.length > 0) result.colors = colors as ColorId[];
-    }
-    return result;
+    return validateTagJson(JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cloud tag prefill (same contract as suggestTagsNative): photo + listing
+ * text → the hosted model, validated against the taxonomy. Returns null when
+ * cloud AI is off/absent or anything fails.
+ */
+export async function suggestTagsCloud(
+  title: string,
+  pageText: string,
+  imageUri?: string | null,
+): Promise<SuggestedProductTags | null> {
+  if (!cloudReady(cloud)) return null;
+  const raw = await cloudChat(cloud!, {
+    system: 'You classify clothing products into a fixed tag taxonomy. Reply with JSON only.',
+    user: buildTagUserMessage(title, pageText),
+    images: imageUri && cloud!.photos ? [imageUri] : [],
+    json: true,
+    maxTokens: 140,
+  });
+  if (!raw) return null;
+  const json = sliceJson(raw);
+  if (!json) return null;
+  try {
+    return validateTagJson(JSON.parse(json) as Record<string, unknown>);
   } catch {
     return null;
   }

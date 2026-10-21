@@ -5,6 +5,7 @@ import { Suspense } from 'react';
 import { useColorScheme, View } from 'react-native';
 
 import { Colors } from '@/constants/theme';
+import { CloudAiSync } from '@/components/cloud-ai-sync';
 import { migrateDatabaseIfNeeded } from '@/lib/db';
 
 SplashScreen.preventAutoHideAsync();
@@ -46,6 +47,7 @@ export default function RootLayout() {
             <Stack.Screen name="add-item" options={{ presentation: 'modal' }} />
             <Stack.Screen name="item/[id]" options={{ presentation: 'modal' }} />
           </Stack>
+          <CloudAiSync />
         </SQLiteProvider>
       </Suspense>
     </ThemeProvider>

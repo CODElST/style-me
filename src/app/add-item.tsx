@@ -15,7 +15,7 @@ import { Spacing, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAppSettings } from '@/hooks/use-settings';
 import { saveItem } from '@/lib/db';
-import { suggestTags, suggestTagsNative, type SuggestedProductTags } from '@/lib/ai';
+import { suggestTags, suggestTagsNative, suggestTagsCloud, type SuggestedProductTags } from '@/lib/ai';
 import { pickPhoto, finalizePhoto } from '@/lib/photos';
 import { webLookup } from '@/lib/lookup';
 import { analyzeImageFile, downloadAndPrepare, fetchProduct } from '@/lib/extract';
@@ -157,16 +157,18 @@ export default function AddItemScreen() {
         `Pre-filled from ${page.site ?? 'the product page'} — review type, colors and warmth before saving.`,
       );
 
-      // Progressive on-device AI refinement: rules tags are already applied;
-      // Gemini Nano (photo + listing text) fills only the gaps the rules left.
+      // Progressive AI refinement: rules tags are already applied; Nano
+      // (photo + listing text) fills only the gaps the rules left, then the
+      // cloud model fills anything still missing — both strictly opt-in.
       const mine = idRef.current;
-      const aiTags = await suggestTagsNative(page.title ?? '', page.text, stored);
+      let aiTags = await suggestTagsNative(page.title ?? '', page.text, stored);
+      if (!aiTags || Object.keys(aiTags).length === 0) {
+        aiTags = await suggestTagsCloud(page.title ?? '', page.text, stored);
+      }
       if (!aiTags || idRef.current !== mine) return;
-      setDraft((d) => mergeAiTags(d, auto, aiTags));
+      setDraft((d) => mergeAiTags(d, auto, aiTags!));
       if (Object.keys(aiTags).length > 0) {
-        setAutofillNote(
-          'Pre-filled from the page; on-device AI refined the tags using the photo. Review before saving.',
-        );
+        setAutofillNote('Pre-filled from the page; AI refined the tags. Review before saving.');
       }
     } catch (e) {
       Alert.alert('Link', `Could not use that image: ${(e as Error).message}`);

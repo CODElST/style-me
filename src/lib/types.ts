@@ -111,6 +111,13 @@ export interface AppSettings {
   /** consent to send a cropped photo to the lookup service */
   lookupConsent: boolean;
   lookupEndpoint: string;
+  /** optional cloud AI (OpenRouter/Groq-style OpenAI-compatible endpoint) */
+  cloudAiEnabled: boolean;
+  cloudAiEndpoint: string;
+  cloudAiModel: string;
+  cloudAiKey: string;
+  /** include item photos with cloud requests (photos leave the phone) */
+  cloudAiPhotos: boolean;
   /** last context used on Today (persists across sessions) */
   lastOccasion: OccasionId;
   lastTemp: TempBandId;

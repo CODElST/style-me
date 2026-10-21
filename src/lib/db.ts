@@ -283,6 +283,11 @@ const DEFAULT_LOOKUP_ENDPOINT = String(
 const SETTINGS_DEFAULTS: AppSettings = {
   lookupConsent: false,
   lookupEndpoint: DEFAULT_LOOKUP_ENDPOINT,
+  cloudAiEnabled: false,
+  cloudAiEndpoint: '',
+  cloudAiModel: '',
+  cloudAiKey: '',
+  cloudAiPhotos: false,
   lastOccasion: 'out' as OccasionId,
   lastTemp: 'mild' as TempBandId,
   lastMood: 'classic' as MoodId,
@@ -294,6 +299,11 @@ export async function getSettings(db: SQLiteDatabase): Promise<AppSettings> {
   return {
     lookupConsent: kv.get('lookupConsent') === '1',
     lookupEndpoint: kv.get('lookupEndpoint') ?? SETTINGS_DEFAULTS.lookupEndpoint,
+    cloudAiEnabled: kv.get('cloudAiEnabled') === '1',
+    cloudAiEndpoint: kv.get('cloudAiEndpoint') ?? SETTINGS_DEFAULTS.cloudAiEndpoint,
+    cloudAiModel: kv.get('cloudAiModel') ?? SETTINGS_DEFAULTS.cloudAiModel,
+    cloudAiKey: kv.get('cloudAiKey') ?? SETTINGS_DEFAULTS.cloudAiKey,
+    cloudAiPhotos: kv.get('cloudAiPhotos') === '1',
     lastOccasion: (kv.get('lastOccasion') as OccasionId) ?? SETTINGS_DEFAULTS.lastOccasion,
     lastTemp: (kv.get('lastTemp') as TempBandId) ?? SETTINGS_DEFAULTS.lastTemp,
     lastMood: (kv.get('lastMood') as MoodId) ?? SETTINGS_DEFAULTS.lastMood,
